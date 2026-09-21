@@ -1,0 +1,6 @@
+DB_URL=jdbc:postgresql://localhost:5432/trova_benzina
+DB_USERNAME=postgres
+DB_PASSWORD=
+MIMIT_STATIONS_URL=
+MIMIT_PRICES_URL=
+MIMIT_IMPORT_CRON=0 0 3 * * *
