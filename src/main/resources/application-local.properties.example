@@ -1,6 +1,10 @@
 DB_URL=jdbc:postgresql://localhost:5432/trova_benzina
 DB_USERNAME=postgres
-DB_PASSWORD=
+DB_PASSWORD=Xhdrbzhtte21.
 MIMIT_STATIONS_URL=
 MIMIT_PRICES_URL=
 MIMIT_IMPORT_CRON=0 0 3 * * *
+JWT_SECRET=dev-secret-change-me-before-production-please
+ADMIN_EMAIL=admin@trovabenzina.it
+ADMIN_PASSWORD=trova-admin
+CORS_ALLOWED_ORIGINS=http://localhost:3000

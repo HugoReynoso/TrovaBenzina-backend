@@ -1,5 +1,6 @@
 package it.trovabenzina.mapper;
 
+import java.time.ZoneOffset;
 import java.util.List;
 
 import it.trovabenzina.dto.StationPriceDto;
@@ -16,8 +17,9 @@ public final class StationMapper {
 	}
 
 	public static StationPriceDto toPriceDto(StationPrice price) {
-		return new StationPriceDto(price.getFuelType().getId(), price.getFuelType().getCode(),
-				price.getFuelType().getName(), price.getPrice(), price.getSelfService(), price.getCommunicatedAt());
+		return new StationPriceDto(price.getFuelType().getCode(), price.getFuelType().getName(), price.getPrice(),
+				price.getSelfService(),
+				price.getCommunicatedAt() == null ? null : price.getCommunicatedAt().toInstant(ZoneOffset.UTC));
 	}
 
 	public static StationResponseDto toDto(Station station, List<StationPrice> prices) {
@@ -27,10 +29,8 @@ public final class StationMapper {
 		List<StationPriceDto> priceDtos = prices.stream().map(StationMapper::toPriceDto).toList();
 
 		return new StationResponseDto(station.getId(), station.getMimitId(), station.getName(), station.getBrand(),
-				station.getAddress(), station.getMunicipality(), station.getProvinceCode(), station.getLatitude(),
-				station.getLongitude(), station.getActive(), city != null ? city.getId() : null,
-				city != null ? city.getName() : null, province != null ? province.getId() : null,
-				province != null ? province.getName() : null, region != null ? region.getId() : null,
-				region != null ? region.getName() : null, priceDtos);
+				station.getAddress(), station.getLatitude(), station.getLongitude(), city != null ? city.getId() : null,
+				city != null ? city.getName() : null, province != null ? province.getName() : null,
+				region != null ? region.getName() : null, null, priceDtos);
 	}
 }

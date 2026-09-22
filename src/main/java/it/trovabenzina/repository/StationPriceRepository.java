@@ -19,10 +19,12 @@ public interface StationPriceRepository extends JpaRepository<StationPrice, Long
 	List<StationPrice> findByStationIdIn(List<Long> stationIds);
 
 	@Query("""
-			select avg(sp.price), min(sp.price), max(sp.price), count(distinct sp.station.id)
+			select avg(sp.price), min(sp.price), max(sp.price), count(distinct sp.station.id), max(sp.communicatedAt)
 			from StationPrice sp
 			where sp.station.city.id = :cityId
 			  and sp.fuelType.id = :fuelTypeId
+			  and sp.station.active = true
+			  and sp.price > 0
 			""")
 	Object[] calculateStatistics(@Param("cityId") Long cityId, @Param("fuelTypeId") Long fuelTypeId);
 }

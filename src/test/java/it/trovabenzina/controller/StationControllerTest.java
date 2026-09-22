@@ -37,7 +37,7 @@ class StationControllerTest {
 	}
 
 	private StationResponseDto station() {
-		return new StationResponseDto(1L, 10L, "Station Test", "Brand", "Via Roma", "Milano", "MI", 45.46, 9.19,
-				true, 1L, "Milano", 1L, "Milano", 1L, "Lombardia", List.of());
+		return new StationResponseDto(1L, "MI-000010", "Station Test", "Brand", "Via Roma", 45.46, 9.19,
+				1L, "Milano", "Milano", "Lombardia", null, List.of());
 	}
 }

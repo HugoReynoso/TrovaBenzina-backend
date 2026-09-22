@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS fuel_types (
 
 CREATE TABLE IF NOT EXISTS stations (
     id BIGSERIAL PRIMARY KEY,
-    mimit_id BIGINT UNIQUE,
+    mimit_id VARCHAR(40) UNIQUE,
     name VARCHAR(255) NOT NULL,
     brand VARCHAR(120),
     address VARCHAR(255),
@@ -28,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_stations_brand ON stations(brand);
 INSERT INTO fuel_types (code, name, active)
 VALUES
     ('BENZINA', 'Benzina', TRUE),
-    ('GASOLIO', 'Gasolio', TRUE),
+    ('DIESEL', 'Diesel', TRUE),
     ('GPL', 'GPL', TRUE),
     ('METANO', 'Metano', TRUE)
 ON CONFLICT (code) DO NOTHING;

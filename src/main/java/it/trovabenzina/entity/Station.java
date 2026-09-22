@@ -27,7 +27,7 @@ public class Station {
 	private Long id;
 
 	@Column(name = "mimit_id", unique = true)
-	private Long mimitId;
+	private String mimitId;
 
 	@Column(nullable = false, length = 255)
 	private String name;

@@ -12,7 +12,7 @@ import it.trovabenzina.entity.Station;
 
 public interface StationRepository extends JpaRepository<Station, Long> {
 
-	Optional<Station> findByMimitId(Long mimitId);
+	Optional<Station> findByMimitId(String mimitId);
 
 	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
 	@Query("""

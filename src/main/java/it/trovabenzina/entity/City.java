@@ -25,6 +25,13 @@ public class City {
 	@Column(nullable = false, length = 120)
 	private String name;
 
+	@Column(nullable = false, unique = true, length = 140)
+	private String slug;
+
+	private Double latitude;
+
+	private Double longitude;
+
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "province_id", nullable = false)
 	private Province province;

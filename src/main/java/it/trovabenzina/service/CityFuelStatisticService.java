@@ -1,6 +1,8 @@
 package it.trovabenzina.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -8,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import it.trovabenzina.dto.CityFuelStatisticHistoryDto;
 import it.trovabenzina.dto.CityFuelStatisticResponseDto;
+import it.trovabenzina.entity.City;
 import it.trovabenzina.entity.CityFuelDailyStatistic;
 import it.trovabenzina.entity.FuelType;
 import it.trovabenzina.exception.CityNotFoundException;
@@ -35,11 +38,17 @@ public class CityFuelStatisticService {
 
 	@Transactional(readOnly = true)
 	public CityFuelStatisticResponseDto latest(Long cityId, String fuelType) {
-		validateInputs(cityId, fuelType);
-		CityFuelDailyStatistic statistic = statisticRepository
-				.findFirstByCityIdAndFuelTypeCodeIgnoreCaseOrderByDateDesc(cityId, fuelType)
+		City city = cityRepository.findById(cityId).orElseThrow(() -> new CityNotFoundException(cityId));
+		FuelType foundFuelType = fuelTypeRepository.findByCodeIgnoreCase(fuelType)
 				.orElseThrow(() -> new FuelTypeNotFoundException(fuelType));
-		return toDto(statistic);
+		Object[] values = stationPriceRepository.calculateStatistics(cityId, foundFuelType.getId());
+		if (values == null || values.length == 0 || values[0] == null) {
+			throw new FuelTypeNotFoundException(fuelType);
+		}
+		LocalDateTime updatedAt = values[4] instanceof LocalDateTime dateTime ? dateTime : LocalDateTime.now();
+		return new CityFuelStatisticResponseDto(city.getId(), city.getName(), foundFuelType.getCode(),
+				(java.math.BigDecimal) values[0], (java.math.BigDecimal) values[1], (java.math.BigDecimal) values[2],
+				((Number) values[3]).intValue(), updatedAt.toInstant(ZoneOffset.UTC));
 	}
 
 	@Transactional(readOnly = true)
@@ -71,7 +80,8 @@ public class CityFuelStatisticService {
 	private CityFuelStatisticResponseDto toDto(CityFuelDailyStatistic statistic) {
 		return new CityFuelStatisticResponseDto(statistic.getCity().getId(), statistic.getCity().getName(),
 				statistic.getFuelType().getCode(), statistic.getAveragePrice(), statistic.getMinimumPrice(),
-				statistic.getMaximumPrice(), statistic.getStationCount(), statistic.getDate());
+				statistic.getMaximumPrice(), statistic.getStationCount(),
+				statistic.getUpdatedAt() == null ? null : statistic.getUpdatedAt().toInstant(ZoneOffset.UTC));
 	}
 
 	@Transactional
@@ -89,6 +99,7 @@ public class CityFuelStatisticService {
 		statistic.setMinimumPrice((java.math.BigDecimal) values[1]);
 		statistic.setMaximumPrice((java.math.BigDecimal) values[2]);
 		statistic.setStationCount(((Number) values[3]).intValue());
+		statistic.setUpdatedAt(java.time.LocalDateTime.now());
 		statisticRepository.save(statistic);
 	}
 }

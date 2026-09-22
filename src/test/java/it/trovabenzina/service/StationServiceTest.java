@@ -71,7 +71,7 @@ class StationServiceTest {
 		city.setProvince(province);
 		Station station = new Station();
 		station.setId(1L);
-		station.setMimitId(10L);
+		station.setMimitId("MI-000010");
 		station.setName("Station Test");
 		station.setCity(city);
 		station.setActive(true);

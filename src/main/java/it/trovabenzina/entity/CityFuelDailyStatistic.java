@@ -2,6 +2,7 @@ package it.trovabenzina.entity;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -50,4 +51,7 @@ public class CityFuelDailyStatistic {
 
 	@Column(name = "station_count", nullable = false)
 	private Integer stationCount;
+
+	@Column(name = "updated_at", nullable = false)
+	private LocalDateTime updatedAt;
 }

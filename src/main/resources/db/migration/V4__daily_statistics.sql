@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS city_fuel_daily_statistics (
     minimum_price NUMERIC(8, 3) NOT NULL,
     maximum_price NUMERIC(8, 3) NOT NULL,
     station_count INTEGER NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_city_fuel_stat_date UNIQUE (city_id, fuel_type_id, date)
 );
 

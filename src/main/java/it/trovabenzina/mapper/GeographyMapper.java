@@ -18,14 +18,13 @@ public final class GeographyMapper {
 
 	public static ProvinceResponseDto toDto(Province province) {
 		Region region = province.getRegion();
-		return new ProvinceResponseDto(province.getId(), province.getName(), province.getCode(), region.getId(),
-				region.getName());
+		return new ProvinceResponseDto(province.getId(), province.getName(), province.getCode(), region.getId());
 	}
 
 	public static CityResponseDto toDto(City city) {
 		Province province = city.getProvince();
 		Region region = province.getRegion();
-		return new CityResponseDto(city.getId(), city.getName(), province.getId(), province.getName(),
-				province.getCode(), region.getId(), region.getName());
+		return new CityResponseDto(city.getId(), city.getName(), city.getSlug(), province.getId(), province.getName(),
+				region.getName(), city.getLatitude(), city.getLongitude());
 	}
 }

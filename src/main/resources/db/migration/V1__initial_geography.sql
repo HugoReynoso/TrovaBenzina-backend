@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS provinces (
 CREATE TABLE IF NOT EXISTS cities (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(120) NOT NULL,
+    slug VARCHAR(140) NOT NULL UNIQUE,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
     province_id BIGINT NOT NULL REFERENCES provinces(id)
 );
 

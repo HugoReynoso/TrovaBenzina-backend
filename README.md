@@ -1,14 +1,15 @@
 # TrovaBenzina Backend
 
-Backend monolitico Spring Boot per il progetto TrovaBenzina. L'obiettivo e' esporre API per consultare distributori, prezzi carburante, statistiche cittadine e preparare l'import automatico dagli Open Data MIMIT.
+Backend monolitico Spring Boot compatibile con il frontend Next.js di TrovaBenzina. Espone JSON camelCase per consultare geografia, distributori, prezzi, statistiche, segnalazioni prezzo e pannello admin.
 
 ## Stack
 
 - Java 21
-- Spring Boot
+- Spring Boot 3.3.x
 - Maven
 - Spring Web MVC
 - Spring Data JPA
+- Spring Security
 - PostgreSQL
 - Flyway
 - Jakarta Validation
@@ -29,14 +30,29 @@ Variabili ambiente supportate:
 ```bash
 DB_URL=jdbc:postgresql://localhost:5432/trova_benzina
 DB_USERNAME=postgres
-DB_PASSWORD=
+DB_PASSWORD=la_password_del_tuo_postgres_locale
 MIMIT_STATIONS_URL=
 MIMIT_PRICES_URL=
 MIMIT_IMPORT_CRON=0 0 3 * * *
 MIMIT_IMPORT_ENABLED=true
+FLYWAY_BASELINE_ON_MIGRATE=true
+JWT_SECRET=dev-secret-change-me-before-production-please
+ADMIN_EMAIL=admin@trovabenzina.it
+ADMIN_PASSWORD=trova-admin
+CORS_ALLOWED_ORIGINS=http://localhost:3000
 ```
 
 Gli URL MIMIT sono intenzionalmente vuoti di default: vanno impostati con gli URL ufficiali Open Data quando confermati.
+
+Nota locale: `DB_PASSWORD` non ha un valore di default per evitare di committare password reali. Se PostgreSQL e' configurato con autenticazione SCRAM e avvii senza questa variabile, l'app fallisce in avvio con un errore simile a:
+
+```text
+The server requested SCRAM-based authentication, but no password was provided.
+```
+
+In quel caso imposta la password del tuo utente PostgreSQL prima di avviare l'app.
+
+Per non impostare le variabili a ogni avvio, copia `.env.properties.example` in `.env.properties` nella root del backend e inserisci li' la tua password locale. Il file `.env.properties` e' ignorato da Git.
 
 ## Database e Flyway
 
@@ -61,6 +77,14 @@ Migration presenti:
 
 Se il database locale contiene gia' tabelle create manualmente, controlla che nomi tabella e colonne coincidano con le migration prima di avviare Flyway. Le migration usano `CREATE TABLE IF NOT EXISTS` e non cancellano dati, ma Flyway registrera' lo stato nello schema history.
 
+Per un database locale gia' non vuoto ma senza tabella `flyway_schema_history`, la configurazione abilita:
+
+```properties
+spring.flyway.baseline-on-migrate=true
+```
+
+Questo permette a Flyway di inizializzare la history table e proseguire con le migration successive.
+
 ## Avvio
 
 ```bash
@@ -70,8 +94,13 @@ Se il database locale contiene gia' tabelle create manualmente, controlla che no
 Su Windows:
 
 ```powershell
+$env:DB_URL="jdbc:postgresql://localhost:5432/trova_benzina"
+$env:DB_USERNAME="postgres"
+$env:DB_PASSWORD="la_password_del_tuo_postgres_locale"
 .\mvnw.cmd spring-boot:run
 ```
+
+Se usi IntelliJ/Eclipse/VS Code, aggiungi le stesse variabili nella Run Configuration del backend. Puoi usare `src/main/resources/application-local.properties.example` come promemoria dei nomi da configurare, senza inserire password nel repository.
 
 ## Test e build
 
@@ -128,9 +157,82 @@ Import MIMIT manuale:
 curl -X POST http://localhost:8080/api/admin/mimit/import
 ```
 
-L'endpoint admin e' temporaneo e deve essere protetto prima della produzione.
+Segnalazioni prezzo:
+
+```bash
+curl -X POST http://localhost:8080/api/price-reports \
+  -H "Content-Type: application/json" \
+  -d '{"stationId":103,"stationName":"IP Navigli","brand":"IP","cityName":"Milano","fuelTypeCode":"BENZINA","price":1.689,"selfService":true,"reporterName":"Utente mobile","reporterEmail":"utente@example.com","note":"Prezzo visto sul tabellone"}'
+```
+
+Admin:
+
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@trovabenzina.it","password":"trova-admin"}'
+
+curl http://localhost:8080/api/admin/price-reports \
+  -H "Authorization: Bearer <token>"
+
+curl -X PATCH http://localhost:8080/api/admin/price-reports/9001/approve \
+  -H "Authorization: Bearer <token>"
+
+curl -X PATCH http://localhost:8080/api/admin/price-reports/9001/reject \
+  -H "Authorization: Bearer <token>"
+```
+
+Gli endpoint `GET /api/admin/**` e `PATCH /api/admin/**` sono protetti da JWT. `POST /api/price-reports` e gli endpoint pubblici restano accessibili al frontend.
 
 ## Import MIMIT
+
+Il backend integra l'import ufficiale dai CSV MIMIT Open Data. Non vengono usate fonti terze o scraping.
+
+Variabili richieste:
+
+```properties
+MIMIT_STATIONS_URL=https://...
+MIMIT_PRICES_URL=https://...
+MIMIT_IMPORT_ENABLED=false
+MIMIT_IMPORT_CRON=0 0 3 * * *
+```
+
+Gli URL non sono hardcodati nel codice: vanno impostati tramite ambiente o `.env.properties`.
+
+Formato atteso:
+
+- CSV con header
+- separatore `|`
+- encoding UTF-8
+- decimali con `.` o `,`
+- righe malformate saltate e loggate senza interrompere tutto l'import
+
+Import manuale:
+
+```bash
+curl -X POST http://localhost:8080/api/admin/mimit/import \
+  -H "Authorization: Bearer <token>"
+```
+
+Scheduler:
+
+```properties
+MIMIT_IMPORT_ENABLED=true
+MIMIT_IMPORT_CRON=0 0 3 * * *
+```
+
+Flusso dati:
+
+```text
+download anagrafica -> parsing -> upsert stations -> download prezzi -> parsing -> upsert prezzi correnti -> storico prezzi -> statistiche città
+```
+
+Troubleshooting:
+
+- `MIMIT URL is not configured`: imposta `MIMIT_STATIONS_URL` e `MIMIT_PRICES_URL`
+- download HTTP fallito: verifica URL e connettività
+- schema non vuoto senza Flyway history: lascia `FLYWAY_BASELINE_ON_MIGRATE=true` in locale
+- import parziale: controlla `messages` e contatori `stationsSkipped`, `pricesSkipped`, `errors` nella risposta
 
 Package:
 
