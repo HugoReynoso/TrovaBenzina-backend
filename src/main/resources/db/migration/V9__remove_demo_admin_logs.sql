@@ -1,0 +1,2 @@
+DELETE FROM admin_logs
+WHERE id IN (7101, 7102, 7103);
