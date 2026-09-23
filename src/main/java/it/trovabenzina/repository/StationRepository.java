@@ -41,7 +41,7 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 	Optional<Station> findDetailsById(@Param("id") Long id);
 
 	@Query("""
-			select distinct s
+			select s
 			from Station s
 			join fetch s.city c
 			join fetch c.province p

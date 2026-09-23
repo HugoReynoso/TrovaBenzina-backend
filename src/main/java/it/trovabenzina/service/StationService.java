@@ -2,6 +2,7 @@ package it.trovabenzina.service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
@@ -48,7 +49,7 @@ public class StationService {
 		int safeLimit = limit == null ? 10 : Math.max(1, Math.min(limit, 100));
 		List<Station> stations = stationRepository.findCheapest(cityId, fuelType.trim(), selfService,
 				PageRequest.of(0, safeLimit));
-		return mapWithPrices(stations, fuelType.trim(), selfService);
+		return mapWithPrices(distinctById(stations), fuelType.trim(), selfService);
 	}
 
 	private List<StationResponseDto> mapWithPrices(List<Station> stations, String fuelType, Boolean selfService) {
@@ -67,5 +68,13 @@ public class StationService {
 
 	private String normalizeFuelType(String fuelType) {
 		return fuelType == null || fuelType.isBlank() ? null : fuelType.trim();
+	}
+
+	private List<Station> distinctById(List<Station> stations) {
+		Map<Long, Station> uniqueStations = new LinkedHashMap<>();
+		for (Station station : stations) {
+			uniqueStations.putIfAbsent(station.getId(), station);
+		}
+		return uniqueStations.values().stream().toList();
 	}
 }

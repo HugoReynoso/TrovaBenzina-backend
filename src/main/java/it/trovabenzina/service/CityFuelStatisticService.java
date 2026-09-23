@@ -1,9 +1,13 @@
 package it.trovabenzina.service;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,16 +43,20 @@ public class CityFuelStatisticService {
 	@Transactional(readOnly = true)
 	public CityFuelStatisticResponseDto latest(Long cityId, String fuelType) {
 		City city = cityRepository.findById(cityId).orElseThrow(() -> new CityNotFoundException(cityId));
-		FuelType foundFuelType = fuelTypeRepository.findByCodeIgnoreCase(fuelType)
-				.orElseThrow(() -> new FuelTypeNotFoundException(fuelType));
-		Object[] values = stationPriceRepository.calculateStatistics(cityId, foundFuelType.getId());
-		if (values == null || values.length == 0 || values[0] == null) {
-			throw new FuelTypeNotFoundException(fuelType);
+		String normalizedFuelType = normalizeFuelType(fuelType);
+		Optional<FuelType> foundFuelType = fuelTypeRepository.findByCodeIgnoreCase(normalizedFuelType);
+		if (foundFuelType.isPresent()) {
+			Object[] values = normalizeStatisticsResult(
+					stationPriceRepository.calculateStatistics(cityId, foundFuelType.get().getId()));
+			if (values != null) {
+				LocalDateTime updatedAt = values[4] instanceof LocalDateTime dateTime ? dateTime : LocalDateTime.now();
+				return new CityFuelStatisticResponseDto(city.getId(), city.getName(), foundFuelType.get().getCode(),
+						toBigDecimal(values[0]), toBigDecimal(values[1]), toBigDecimal(values[2]),
+						((Number) values[3]).intValue(), updatedAt.toInstant(ZoneOffset.UTC));
+			}
 		}
-		LocalDateTime updatedAt = values[4] instanceof LocalDateTime dateTime ? dateTime : LocalDateTime.now();
-		return new CityFuelStatisticResponseDto(city.getId(), city.getName(), foundFuelType.getCode(),
-				(java.math.BigDecimal) values[0], (java.math.BigDecimal) values[1], (java.math.BigDecimal) values[2],
-				((Number) values[3]).intValue(), updatedAt.toInstant(ZoneOffset.UTC));
+		return statisticRepository.findFirstByCityIdAndFuelTypeCodeIgnoreCaseOrderByDateDesc(cityId, normalizedFuelType)
+				.map(this::toDto).orElseGet(() -> emptyStatistic(city, normalizedFuelType));
 	}
 
 	@Transactional(readOnly = true)
@@ -84,10 +92,31 @@ public class CityFuelStatisticService {
 				statistic.getUpdatedAt() == null ? null : statistic.getUpdatedAt().toInstant(ZoneOffset.UTC));
 	}
 
+	private CityFuelStatisticResponseDto emptyStatistic(City city, String fuelType) {
+		return new CityFuelStatisticResponseDto(city.getId(), city.getName(), fuelType, BigDecimal.ZERO, BigDecimal.ZERO,
+				BigDecimal.ZERO, 0, Instant.now());
+	}
+
+	private String normalizeFuelType(String fuelType) {
+		if (fuelType == null || fuelType.isBlank()) {
+			throw new IllegalArgumentException("fuelType is required");
+		}
+		String normalized = fuelType.trim().toUpperCase(Locale.ROOT).replace("À", "A").replace("È", "E")
+				.replace("É", "E").replace("Ì", "I").replace("Ò", "O").replace("Ù", "U")
+				.replaceAll("[^A-Z0-9]+", "_").replaceAll("^_+|_+$", "");
+		return switch (normalized) {
+			case "GASOLIO", "DIESEL", "GASOLIO_SELF", "DIESEL_SELF" -> "DIESEL";
+			case "BENZINA", "SUPER", "SENZA_PIOMBO", "VERDE" -> "BENZINA";
+			case "GPL" -> "GPL";
+			case "METANO", "CNG" -> "METANO";
+			default -> normalized;
+		};
+	}
+
 	@Transactional
 	public void recalculate(Long cityId, FuelType fuelType, LocalDate date) {
-		Object[] values = stationPriceRepository.calculateStatistics(cityId, fuelType.getId());
-		if (values == null || values.length == 0 || values[0] == null) {
+		Object[] values = normalizeStatisticsResult(stationPriceRepository.calculateStatistics(cityId, fuelType.getId()));
+		if (values == null) {
 			return;
 		}
 		CityFuelDailyStatistic statistic = statisticRepository.findByCityIdAndFuelTypeIdAndDate(cityId, fuelType.getId(),
@@ -95,11 +124,29 @@ public class CityFuelStatisticService {
 		statistic.setCity(cityRepository.findById(cityId).orElseThrow(() -> new CityNotFoundException(cityId)));
 		statistic.setFuelType(fuelType);
 		statistic.setDate(date);
-		statistic.setAveragePrice((java.math.BigDecimal) values[0]);
-		statistic.setMinimumPrice((java.math.BigDecimal) values[1]);
-		statistic.setMaximumPrice((java.math.BigDecimal) values[2]);
+		statistic.setAveragePrice(toBigDecimal(values[0]));
+		statistic.setMinimumPrice(toBigDecimal(values[1]));
+		statistic.setMaximumPrice(toBigDecimal(values[2]));
 		statistic.setStationCount(((Number) values[3]).intValue());
 		statistic.setUpdatedAt(java.time.LocalDateTime.now());
 		statisticRepository.save(statistic);
+	}
+
+	private Object[] normalizeStatisticsResult(Object[] values) {
+		if (values == null || values.length == 0) {
+			return null;
+		}
+		Object[] row = values.length == 1 && values[0] instanceof Object[] nested ? nested : values;
+		return row.length < 5 || row[0] == null ? null : row;
+	}
+
+	private BigDecimal toBigDecimal(Object value) {
+		if (value instanceof BigDecimal decimal) {
+			return decimal;
+		}
+		if (value instanceof Number number) {
+			return BigDecimal.valueOf(number.doubleValue());
+		}
+		return new BigDecimal(value.toString());
 	}
 }

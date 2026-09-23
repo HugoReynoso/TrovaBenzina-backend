@@ -7,7 +7,11 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,14 +92,23 @@ public class MimitImportService {
 	}
 
 	private void upsertStations(List<MimitStationRecord> records, ImportState state) {
+		Map<String, Station> stationsByMimitId = stationRepository.findAll().stream()
+				.filter(station -> !isBlank(station.getMimitId()))
+				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
+		Map<String, City> citiesByNameProvince = cityRepository.findAllByOrderByNameAsc().stream()
+				.filter(city -> city.getProvince() != null && !isBlank(city.getProvince().getCode()))
+				.collect(Collectors.toMap(city -> cityKey(city.getName(), city.getProvince().getCode()), Function.identity(),
+						(left, right) -> left));
+		List<Station> stationsToSave = new ArrayList<>();
 		for (MimitStationRecord record : records) {
 			if (isBlank(record.mimitId())) {
 				state.skipStation("Missing station mimitId");
 				continue;
 			}
-			Station station = stationRepository.findByMimitId(record.mimitId()).orElseGet(Station::new);
+			String mimitId = record.mimitId().trim();
+			Station station = stationsByMimitId.getOrDefault(mimitId, new Station());
 			boolean inserted = station.getId() == null;
-			station.setMimitId(record.mimitId().trim());
+			station.setMimitId(mimitId);
 			station.setName(valueOrFallback(record.name(), "Impianto " + record.mimitId()));
 			station.setBrand(blankToNull(record.brand()));
 			station.setAddress(blankToNull(record.address()));
@@ -104,49 +117,73 @@ public class MimitImportService {
 			station.setLatitude(record.latitude());
 			station.setLongitude(record.longitude());
 			station.setActive(true);
-			resolveCity(record).ifPresentOrElse(station::setCity, () -> state.message(
+			City city = citiesByNameProvince.get(cityKey(record.municipality(), record.provinceCode()));
+			if (city != null) {
+				station.setCity(city);
+			} else {
+				state.message(
 					"City not found for station " + record.mimitId() + " (" + record.municipality() + ", "
-							+ record.provinceCode() + "); station saved without city"));
-			stationRepository.save(station);
+							+ record.provinceCode() + "); station saved without city");
+			}
+			stationsToSave.add(station);
+			stationsByMimitId.put(mimitId, station);
 			if (inserted) {
 				state.stationsInserted++;
 			} else {
 				state.stationsUpdated++;
 			}
 		}
+		stationRepository.saveAll(stationsToSave);
 	}
 
 	private Set<CityFuelPair> upsertPrices(List<MimitPriceRecord> records, ImportState state) {
 		Set<CityFuelPair> cityFuelPairs = new HashSet<>();
+		Map<String, Station> stationsByMimitId = stationRepository.findAll().stream()
+				.filter(station -> !isBlank(station.getMimitId()))
+				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
+		Map<String, FuelType> fuelTypesByCode = fuelTypeRepository.findAll().stream()
+				.filter(fuelType -> !isBlank(fuelType.getCode()))
+				.collect(Collectors.toMap(fuelType -> fuelType.getCode().trim().toUpperCase(Locale.ROOT),
+						Function.identity(), (left, right) -> left));
+		Map<PriceKey, StationPrice> currentPrices = stationPriceRepository.findAll().stream()
+				.filter(price -> price.getStation() != null && price.getStation().getId() != null
+						&& price.getFuelType() != null && price.getFuelType().getId() != null)
+				.collect(Collectors.toMap(price -> new PriceKey(price.getStation().getId(), price.getFuelType().getId(),
+						Boolean.TRUE.equals(price.getSelfService())), Function.identity(), (left, right) -> left));
+		List<StationPrice> pricesToSave = new ArrayList<>();
+		List<StationPriceHistory> historiesToSave = new ArrayList<>();
+		Set<PriceKey> pricesToSaveKeys = new HashSet<>();
+		LocalDateTime importedAt = LocalDateTime.now();
 		for (MimitPriceRecord record : records) {
 			if (isBlank(record.stationMimitId()) || isBlank(record.fuelTypeCode()) || record.price() == null
 					|| record.price().signum() <= 0) {
 				state.skipPrice("Missing station, fuel or valid price");
 				continue;
 			}
-			Station station = stationRepository.findByMimitId(record.stationMimitId().trim()).orElse(null);
+			Station station = stationsByMimitId.get(record.stationMimitId().trim());
 			if (station == null) {
 				state.skipPrice("Station not found for MIMIT id " + record.stationMimitId());
 				continue;
 			}
-			FuelType fuelType = resolveFuelType(record);
-			StationPrice price = stationPriceRepository
-					.findByStationIdAndFuelTypeIdAndSelfService(station.getId(), fuelType.getId(), record.selfService())
-					.orElseGet(StationPrice::new);
+			FuelType fuelType = resolveFuelType(record, fuelTypesByCode);
+			PriceKey priceKey = new PriceKey(station.getId(), fuelType.getId(), Boolean.TRUE.equals(record.selfService()));
+			StationPrice price = currentPrices.getOrDefault(priceKey, new StationPrice());
 			boolean inserted = price.getId() == null;
-			boolean changed = inserted || price.getPrice() == null || price.getCommunicatedAt() == null
-					|| price.getPrice().compareTo(record.price()) != 0
-					|| !price.getCommunicatedAt().equals(record.communicatedAt());
+			boolean changed = inserted || hasPriceChanged(price, record);
 
 			price.setStation(station);
 			price.setFuelType(fuelType);
 			price.setPrice(record.price());
 			price.setSelfService(Boolean.TRUE.equals(record.selfService()));
 			price.setCommunicatedAt(record.communicatedAt());
-			price.setImportedAt(LocalDateTime.now());
-			stationPriceRepository.save(price);
+			price.setImportedAt(importedAt);
+			if (pricesToSaveKeys.add(priceKey)) {
+				pricesToSave.add(price);
+			}
+			currentPrices.put(priceKey, price);
 
-			if (changed && insertHistory(station, fuelType, record)) {
+			if (changed) {
+				historiesToSave.add(toHistory(station, fuelType, record, importedAt));
 				state.historyInserted++;
 			}
 			if (station.getCity() != null) {
@@ -158,44 +195,42 @@ public class MimitImportService {
 				state.pricesUpdated++;
 			}
 		}
+		stationPriceRepository.saveAll(pricesToSave);
+		stationPriceHistoryRepository.saveAll(historiesToSave);
 		return cityFuelPairs;
 	}
 
-	private boolean insertHistory(Station station, FuelType fuelType, MimitPriceRecord record) {
-		boolean duplicate = stationPriceHistoryRepository.existsByStationIdAndFuelTypeIdAndSelfServiceAndPriceAndCommunicatedAt(
-				station.getId(), fuelType.getId(), Boolean.TRUE.equals(record.selfService()), record.price(),
-				record.communicatedAt());
-		if (duplicate) {
-			return false;
-		}
+	private StationPriceHistory toHistory(Station station, FuelType fuelType, MimitPriceRecord record,
+			LocalDateTime importedAt) {
 		StationPriceHistory history = new StationPriceHistory();
 		history.setStation(station);
 		history.setFuelType(fuelType);
 		history.setPrice(record.price());
 		history.setSelfService(Boolean.TRUE.equals(record.selfService()));
 		history.setCommunicatedAt(record.communicatedAt());
-		history.setImportedAt(LocalDateTime.now());
-		stationPriceHistoryRepository.save(history);
-		return true;
+		history.setImportedAt(importedAt);
+		return history;
 	}
 
-	private FuelType resolveFuelType(MimitPriceRecord record) {
+	private FuelType resolveFuelType(MimitPriceRecord record, Map<String, FuelType> fuelTypesByCode) {
 		String code = csvParser.normalizeFuelTypeName(record.fuelTypeCode());
-		return fuelTypeRepository.findByCodeIgnoreCase(code).orElseGet(() -> {
+		return fuelTypesByCode.computeIfAbsent(code, key -> {
 			FuelType created = new FuelType();
-			created.setCode(code);
-			created.setName(valueOrFallback(record.fuelTypeName(), code));
+			created.setCode(key);
+			created.setName(valueOrFallback(record.fuelTypeName(), key));
 			created.setActive(true);
 			return fuelTypeRepository.save(created);
 		});
 	}
 
-	private java.util.Optional<City> resolveCity(MimitStationRecord record) {
-		if (isBlank(record.municipality()) || isBlank(record.provinceCode())) {
-			return java.util.Optional.empty();
-		}
-		return cityRepository.findFirstByNameIgnoreCaseAndProvinceCodeIgnoreCase(record.municipality().trim(),
-				normalizeProvinceCode(record.provinceCode()));
+	private boolean hasPriceChanged(StationPrice price, MimitPriceRecord record) {
+		return price.getPrice() == null || price.getPrice().compareTo(record.price()) != 0
+				|| !Objects.equals(price.getCommunicatedAt(), record.communicatedAt());
+	}
+
+	private String cityKey(String municipality, String provinceCode) {
+		return valueOrFallback(municipality, "").toUpperCase(Locale.ROOT) + "|"
+				+ valueOrFallback(provinceCode, "").toUpperCase(Locale.ROOT);
 	}
 
 	private String valueOrFallback(String value, String fallback) {
@@ -215,6 +250,9 @@ public class MimitImportService {
 	}
 
 	private record CityFuelPair(Long cityId, FuelType fuelType) {
+	}
+
+	private record PriceKey(Long stationId, Long fuelTypeId, Boolean selfService) {
 	}
 
 	private static final class ImportState {
@@ -247,7 +285,9 @@ public class MimitImportService {
 		}
 
 		private void message(String message) {
-			messages.add(message);
+			if (messages.size() < 100) {
+				messages.add(message);
+			}
 			if (messages.size() <= 20) {
 				log.warn("MIMIT import: {}", message);
 			}

@@ -7,7 +7,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Optional;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +20,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import it.trovabenzina.entity.City;
 import it.trovabenzina.entity.FuelType;
+import it.trovabenzina.entity.Province;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
 import it.trovabenzina.repository.CityRepository;
@@ -63,8 +64,8 @@ class MimitImportServiceTest {
 	@Test
 	void importsNewStationPriceAndHistory() {
 		String stationsCsv = """
-				idImpianto|Gestore|Bandiera|Indirizzo|Comune|Provincia|Latitudine|Longitudine
-				123|Mario Rossi|Q8|Via Roma 1|Milano|MI|45.4642|9.1900
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				123|Mario Rossi|Q8|Stradale|Q8 Loreto|Via Roma 1|Milano|MI|45.4642|9.1900
 				""";
 		String pricesCsv = """
 				idImpianto|desc_carburante|prezzo|is_self|dtComu
@@ -76,23 +77,23 @@ class MimitImportServiceTest {
 		City city = new City();
 		city.setId(7L);
 		city.setName("Milano");
-		when(cityRepository.findFirstByNameIgnoreCaseAndProvinceCodeIgnoreCase("Milano", "MI")).thenReturn(Optional.of(city));
+		Province province = new Province();
+		province.setCode("MI");
+		city.setProvince(province);
+		when(cityRepository.findAllByOrderByNameAsc()).thenReturn(List.of(city));
 
 		Station savedStation = new Station();
 		savedStation.setId(10L);
 		savedStation.setMimitId("123");
 		savedStation.setCity(city);
-		when(stationRepository.findByMimitId("123")).thenReturn(Optional.empty(), Optional.of(savedStation));
-		when(stationRepository.save(any(Station.class))).thenReturn(savedStation);
+		when(stationRepository.findAll()).thenReturn(List.of(), List.of(savedStation));
 
 		FuelType fuelType = new FuelType();
 		fuelType.setId(3L);
 		fuelType.setCode("BENZINA");
 		fuelType.setName("Benzina");
-		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(Optional.of(fuelType));
-		when(stationPriceRepository.findByStationIdAndFuelTypeIdAndSelfService(10L, 3L, true)).thenReturn(Optional.empty());
-		when(historyRepository.existsByStationIdAndFuelTypeIdAndSelfServiceAndPriceAndCommunicatedAt(any(), any(), any(),
-				any(BigDecimal.class), any())).thenReturn(false);
+		when(fuelTypeRepository.findAll()).thenReturn(List.of(fuelType));
+		when(stationPriceRepository.findAll()).thenReturn(List.of());
 
 		MimitImportResult result = importService.importData();
 
@@ -102,15 +103,15 @@ class MimitImportServiceTest {
 		assertThat(result.pricesInserted()).isEqualTo(1);
 		assertThat(result.historyInserted()).isEqualTo(1);
 		assertThat(result.statisticsUpdated()).isEqualTo(1);
-		verify(stationPriceRepository).save(any(StationPrice.class));
+		verify(stationPriceRepository).saveAll(any());
 		verify(statisticService).recalculate(7L, fuelType, LocalDate.now());
 	}
 
 	@Test
 	void avoidsDuplicateHistoryWhenSamePriceAlreadyExists() {
 		String stationsCsv = """
-				idImpianto|Gestore|Comune|Provincia
-				123|Mario Rossi|Milano|MI
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				123|Mario Rossi|Q8|Stradale|Q8 Loreto|Via Roma 1|Milano|MI|45.4642|9.1900
 				""";
 		String pricesCsv = """
 				idImpianto|desc_carburante|prezzo|is_self|dtComu
@@ -121,25 +122,31 @@ class MimitImportServiceTest {
 
 		City city = new City();
 		city.setId(7L);
-		when(cityRepository.findFirstByNameIgnoreCaseAndProvinceCodeIgnoreCase("Milano", "MI")).thenReturn(Optional.of(city));
+		city.setName("Milano");
+		Province province = new Province();
+		province.setCode("MI");
+		city.setProvince(province);
+		when(cityRepository.findAllByOrderByNameAsc()).thenReturn(List.of(city));
 
 		Station station = new Station();
 		station.setId(10L);
 		station.setMimitId("123");
 		station.setCity(city);
-		when(stationRepository.findByMimitId("123")).thenReturn(Optional.of(station), Optional.of(station));
+		when(stationRepository.findAll()).thenReturn(List.of(station), List.of(station));
 
 		FuelType fuelType = new FuelType();
 		fuelType.setId(3L);
 		fuelType.setCode("BENZINA");
-		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(Optional.of(fuelType));
+		when(fuelTypeRepository.findAll()).thenReturn(List.of(fuelType));
 
 		StationPrice current = new StationPrice();
 		current.setId(99L);
+		current.setStation(station);
+		current.setFuelType(fuelType);
 		current.setPrice(new BigDecimal("1.789"));
+		current.setSelfService(true);
 		current.setCommunicatedAt(java.time.LocalDateTime.of(2026, 9, 22, 8, 30));
-		when(stationPriceRepository.findByStationIdAndFuelTypeIdAndSelfService(10L, 3L, true))
-				.thenReturn(Optional.of(current));
+		when(stationPriceRepository.findAll()).thenReturn(List.of(current));
 
 		MimitImportResult result = importService.importData();
 

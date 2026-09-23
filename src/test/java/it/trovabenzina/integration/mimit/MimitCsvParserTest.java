@@ -13,14 +13,14 @@ class MimitCsvParserTest {
 	@Test
 	void parsesPipeSeparatedStationRows() {
 		String csv = """
-				idImpianto|Gestore|Bandiera|Indirizzo|Comune|Provincia|Latitudine|Longitudine
-				123|Mario Rossi|Q8|Via Roma 1|Milano|MI|45,4642|9.1900
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				123|Mario Rossi|Q8|Stradale|Q8 Loreto|Via Roma 1|Milano|MI|45,4642|9.1900
 				""";
 
 		MimitStationRecord record = parser.parseStations(csv).getFirst();
 
 		assertThat(record.mimitId()).isEqualTo("123");
-		assertThat(record.name()).isEqualTo("Mario Rossi");
+		assertThat(record.name()).isEqualTo("Q8 Loreto");
 		assertThat(record.brand()).isEqualTo("Q8");
 		assertThat(record.provinceCode()).isEqualTo("MI");
 		assertThat(record.latitude()).isEqualTo(45.4642);
@@ -40,6 +40,26 @@ class MimitCsvParserTest {
 		assertThat(record.fuelTypeCode()).isEqualTo("DIESEL");
 		assertThat(record.price()).isEqualByComparingTo("2.809");
 		assertThat(record.selfService()).isFalse();
+	}
+
+	@Test
+	void recoversStationRowsWithUnescapedPipeInsideCentralTextFields() {
+		String csv = """
+				Estrazione del 2026-09-20
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				40820|STOIL SIMPLE|Pompe Bianche|Stradale|STOIL SIMPLE | gestori.prezzibenzina.it|STR. PROV.LE 82 SPINETTA SALE 15122|ALESSANDRIA|AL|44.91704718250436|8.70067298412323
+				""";
+
+		MimitStationRecord record = parser.parseStations(csv).getFirst();
+
+		assertThat(record.mimitId()).isEqualTo("40820");
+		assertThat(record.brand()).isEqualTo("Pompe Bianche");
+		assertThat(record.name()).isEqualTo("STOIL SIMPLE | gestori.prezzibenzina.it");
+		assertThat(record.address()).isEqualTo("STR. PROV.LE 82 SPINETTA SALE 15122");
+		assertThat(record.municipality()).isEqualTo("ALESSANDRIA");
+		assertThat(record.provinceCode()).isEqualTo("AL");
+		assertThat(record.latitude()).isEqualTo(44.91704718250436);
+		assertThat(record.longitude()).isEqualTo(8.70067298412323);
 	}
 
 	@Test

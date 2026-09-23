@@ -56,6 +56,16 @@ class StationServiceTest {
 		assertThat(stationService.findCheapest(1L, "BENZINA", true, null)).hasSize(1);
 	}
 
+	@Test
+	void cheapestRemovesDuplicateStationsKeepingPriceOrder() {
+		Station station = station();
+		when(stationRepository.findCheapest(eq(1L), eq("BENZINA"), eq(null), any(Pageable.class)))
+				.thenReturn(List.of(station, station));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
+
+		assertThat(stationService.findCheapest(1L, "BENZINA", null, 10)).hasSize(1);
+	}
+
 	private Station station() {
 		Region region = new Region();
 		region.setId(1L);

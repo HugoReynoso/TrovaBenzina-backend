@@ -8,6 +8,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,23 +30,81 @@ public class MimitCsvParser {
 
 	public List<MimitStationRecord> parseStations(String csv) {
 		List<MimitStationRecord> records = new ArrayList<>();
-		for (CSVRecord row : parseRecords(csv)) {
+		List<String[]> rows = parseStationRows(csv);
+		for (int i = 0; i < rows.size(); i++) {
+			String[] values = rows.get(i);
+			long rowNumber = i + 1L;
 			try {
-				String mimitId = first(row, "idimpianto", "id_impianto", "id impianto", "mimit_id");
+				String mimitId = cleanValue(values[0]);
 				if (isBlank(mimitId)) {
-					log.warn("Skipping MIMIT station row {}: missing station id", row.getRecordNumber());
+					log.warn("Skipping MIMIT station row {}: missing station id", rowNumber);
 					continue;
 				}
-				records.add(new MimitStationRecord(mimitId, first(row, "nome", "name", "gestore", "nomeimpianto"),
-						first(row, "bandiera", "brand", "marchio"), first(row, "indirizzo", "address"),
-						first(row, "comune", "municipality"), first(row, "provincia", "siglaprovincia", "province_code"),
-						parseDouble(first(row, "latitudine", "latitude", "lat")), parseDouble(first(row, "longitudine",
-								"longitude", "lng", "lon"))));
+				records.add(toStationRecord(values));
 			} catch (RuntimeException ex) {
-				log.warn("Skipping malformed MIMIT station row {}: {}", row.getRecordNumber(), ex.getMessage());
+				log.warn("Skipping malformed MIMIT station row {}: {}", rowNumber, ex.getMessage());
 			}
 		}
 		return records;
+	}
+
+	private MimitStationRecord toStationRecord(String[] values) {
+		String mimitId = cleanValue(values[0]);
+		String manager = cleanValue(values[1]);
+		String brand = cleanValue(values[2]);
+		String name = cleanValue(values[4]);
+		String address = cleanValue(values[5]);
+		String municipality = cleanValue(values[6]);
+		String provinceCode = cleanValue(values[7]);
+		String latitude = cleanValue(values[8]);
+		String longitude = cleanValue(values[9]);
+		return new MimitStationRecord(mimitId, valueOrFallback(name, manager), brand, address, municipality,
+				provinceCode, parseDouble(latitude), parseDouble(longitude));
+	}
+
+	private List<String[]> parseStationRows(String csv) {
+		if (isBlank(csv)) {
+			return List.of();
+		}
+		String normalizedCsv = removePreamble(csv);
+		String[] lines = normalizedCsv.split("\n", -1);
+		List<String[]> rows = new ArrayList<>();
+		for (int i = 1; i < lines.length; i++) {
+			if (lines[i].isBlank()) {
+				continue;
+			}
+			String[] tokens = lines[i].split("\\|", -1);
+			if (tokens.length == 10) {
+				rows.add(tokens);
+			} else if (tokens.length > 10) {
+				log.warn("Recovered malformed MIMIT row {} with {} columns", i + 1, tokens.length);
+				rows.add(recoverStationRow(tokens));
+			} else {
+				log.warn("Skipping malformed MIMIT station row {}: expected 10 columns, found {}", i + 1, tokens.length);
+			}
+		}
+		return rows;
+	}
+
+	private String[] recoverStationRow(String[] tokens) {
+		String[] values = new String[10];
+		values[0] = tokens[0];
+		values[1] = tokens[1];
+		values[2] = tokens[2];
+		values[3] = tokens[3];
+		values[6] = tokens[tokens.length - 4];
+		values[7] = tokens[tokens.length - 3];
+		values[8] = tokens[tokens.length - 2];
+		values[9] = tokens[tokens.length - 1];
+		String[] central = Arrays.copyOfRange(tokens, 4, tokens.length - 4);
+		values[4] = central.length <= 1 ? "" : joinClean(Arrays.copyOf(central, central.length - 1));
+		values[5] = central.length == 0 ? "" : cleanValue(central[central.length - 1]);
+		return values;
+	}
+
+	private String joinClean(String[] values) {
+		return Arrays.stream(values).map(this::cleanValue).filter(value -> !isBlank(value))
+				.collect(java.util.stream.Collectors.joining(" | "));
 	}
 
 	public List<MimitPriceRecord> parsePrices(String csv) {
@@ -116,11 +175,26 @@ public class MimitCsvParser {
 		for (String key : keys) {
 			for (Map.Entry<String, String> entry : values.entrySet()) {
 				if (normalizeHeader(entry.getKey()).equals(normalizeHeader(key)) && !isBlank(entry.getValue())) {
-					return entry.getValue().trim();
+					return cleanValue(entry.getValue());
 				}
 			}
 		}
 		return null;
+	}
+
+	private String cleanValue(String value) {
+		if (value == null) {
+			return null;
+		}
+		String trimmed = value.trim();
+		if (trimmed.length() >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+			return trimmed.substring(1, trimmed.length() - 1).trim();
+		}
+		return trimmed;
+	}
+
+	private String valueOrFallback(String value, String fallback) {
+		return isBlank(value) ? fallback : value;
 	}
 
 	private String normalizeHeader(String value) {
