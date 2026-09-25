@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +22,7 @@ import it.trovabenzina.entity.Province;
 import it.trovabenzina.entity.Region;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
+import it.trovabenzina.repository.CityRepository;
 import it.trovabenzina.repository.StationPriceRepository;
 import it.trovabenzina.repository.StationRepository;
 
@@ -32,6 +34,9 @@ class StationServiceTest {
 
 	@Mock
 	private StationPriceRepository stationPriceRepository;
+
+	@Mock
+	private CityRepository cityRepository;
 
 	@InjectMocks
 	private StationService stationService;
@@ -66,7 +71,43 @@ class StationServiceTest {
 		assertThat(stationService.findCheapest(1L, "BENZINA", null, 10)).hasSize(1);
 	}
 
+	@Test
+	void nearbyFiltersByCoordinatesAndReturnsDistance() {
+		Station near = station(1L, 45.465, 9.191);
+		Station far = station(2L, 45.900, 9.800);
+		when(stationRepository.findNearbyCandidates("BENZINA", true)).thenReturn(List.of(far, near));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(near, "BENZINA", true)));
+
+		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findNearby(45.4642, 9.1900, null, 5.0,
+				"BENZINA", true, 10);
+
+		assertThat(result).hasSize(1);
+		assertThat(result.getFirst().id()).isEqualTo(1L);
+		assertThat(result.getFirst().distanceKm()).isNotNull();
+	}
+
+	@Test
+	void nearbyByCityUsesExactCityStationsWhenEnoughResultsExist() {
+		Station station = station(1L, 45.465, 9.191);
+		City city = station.getCity();
+		city.setLatitude(45.4642);
+		city.setLongitude(9.1900);
+		when(cityRepository.findById(1L)).thenReturn(Optional.of(city));
+		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of(station));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
+
+		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findNearby(null, null, 1L, 10.0, "BENZINA",
+				true, 1);
+
+		assertThat(result).hasSize(1);
+		assertThat(result.getFirst().id()).isEqualTo(1L);
+	}
+
 	private Station station() {
+		return station(1L, 45.46, 9.19);
+	}
+
+	private Station station(Long id, Double latitude, Double longitude) {
 		Region region = new Region();
 		region.setId(1L);
 		region.setName("Lombardia");
@@ -80,10 +121,12 @@ class StationServiceTest {
 		city.setName("Milano");
 		city.setProvince(province);
 		Station station = new Station();
-		station.setId(1L);
-		station.setMimitId("MI-000010");
+		station.setId(id);
+		station.setMimitId("MI-0000" + id);
 		station.setName("Station Test");
 		station.setCity(city);
+		station.setLatitude(latitude);
+		station.setLongitude(longitude);
 		station.setActive(true);
 		return station;
 	}

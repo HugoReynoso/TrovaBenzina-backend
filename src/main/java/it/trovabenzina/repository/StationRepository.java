@@ -55,4 +55,19 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			""")
 	List<Station> findCheapest(@Param("cityId") Long cityId, @Param("fuelType") String fuelType,
 			@Param("selfService") Boolean selfService, org.springframework.data.domain.Pageable pageable);
+
+	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
+	@Query("""
+			select distinct s
+			from Station s
+			left join StationPrice sp on sp.station = s
+			left join sp.fuelType ft
+			where s.active = true
+			  and s.latitude is not null
+			  and s.longitude is not null
+			  and (:fuelType is null or upper(ft.code) = upper(:fuelType))
+			  and (:selfService is null or sp.selfService = :selfService)
+			""")
+	List<Station> findNearbyCandidates(@Param("fuelType") String fuelType,
+			@Param("selfService") Boolean selfService);
 }

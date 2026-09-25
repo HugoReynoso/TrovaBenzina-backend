@@ -27,6 +27,14 @@ public class StationController {
 		return stationService.findAll(cityId, fuelType, selfService);
 	}
 
+	@GetMapping("/nearby")
+	public List<StationResponseDto> nearby(@RequestParam(required = false) Double lat,
+			@RequestParam(required = false) Double lng, @RequestParam(required = false) Long cityId,
+			@RequestParam(required = false) Double radiusKm, @RequestParam(required = false) String fuelType,
+			@RequestParam(required = false) Boolean selfService, @RequestParam(required = false) Integer limit) {
+		return stationService.findNearby(lat, lng, cityId, radiusKm, fuelType, selfService, limit);
+	}
+
 	@GetMapping("/{id}")
 	public StationResponseDto findById(@PathVariable Long id) {
 		return stationService.findById(id);

@@ -23,6 +23,10 @@ public final class StationMapper {
 	}
 
 	public static StationResponseDto toDto(Station station, List<StationPrice> prices) {
+		return toDto(station, prices, null);
+	}
+
+	public static StationResponseDto toDto(Station station, List<StationPrice> prices, Double distanceKm) {
 		City city = station.getCity();
 		Province province = city != null ? city.getProvince() : null;
 		Region region = province != null ? province.getRegion() : null;
@@ -31,6 +35,6 @@ public final class StationMapper {
 		return new StationResponseDto(station.getId(), station.getMimitId(), station.getName(), station.getBrand(),
 				station.getAddress(), station.getLatitude(), station.getLongitude(), city != null ? city.getId() : null,
 				city != null ? city.getName() : null, province != null ? province.getName() : null,
-				region != null ? region.getName() : null, null, priceDtos);
+				region != null ? region.getName() : null, distanceKm, priceDtos);
 	}
 }
