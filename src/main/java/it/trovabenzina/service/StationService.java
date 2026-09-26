@@ -72,7 +72,7 @@ public class StationService {
 			Double radiusKm, String fuelType, Boolean selfService, Integer limit) {
 		SearchCenter center = resolveSearchCenter(lat, lng, cityId, cityName, province);
 		double safeRadiusKm = radiusKm == null ? 10.0 : Math.max(0.1, Math.min(radiusKm, 100.0));
-		int safeLimit = limit == null ? 50 : Math.max(1, Math.min(limit, 200));
+		int safeLimit = limit == null ? 250 : Math.max(1, Math.min(limit, 800));
 		String normalizedFuelType = normalizeFuelType(fuelType);
 
 		List<Station> cityStations = findExactCityStations(center, normalizedFuelType, selfService);

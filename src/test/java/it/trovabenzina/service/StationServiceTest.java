@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -137,6 +138,22 @@ class StationServiceTest {
 
 		assertThat(result).hasSize(1);
 		assertThat(result.getFirst().id()).isEqualTo(1L);
+	}
+
+	@Test
+	void nearbyDefaultsTo250AndCapsAt800Markers() {
+		List<Station> candidates = new ArrayList<>();
+		List<StationPrice> prices = new ArrayList<>();
+		for (long i = 1; i <= 900; i++) {
+			Station station = station(i, 45.4642, 9.1900);
+			candidates.add(station);
+			prices.add(price(station, "BENZINA", true));
+		}
+		when(stationRepository.findNearbyCandidates("BENZINA", true)).thenReturn(candidates);
+		when(stationPriceRepository.findByStationIdIn(any())).thenReturn(prices);
+
+		assertThat(stationService.findNearby(45.4642, 9.1900, null, 10.0, "BENZINA", true, null)).hasSize(250);
+		assertThat(stationService.findNearby(45.4642, 9.1900, null, 10.0, "BENZINA", true, 999)).hasSize(800);
 	}
 
 	private Station station() {
