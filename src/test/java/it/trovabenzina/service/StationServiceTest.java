@@ -120,6 +120,25 @@ class StationServiceTest {
 		assertThat(result.getFirst().cityName()).isEqualTo("Milano");
 	}
 
+	@Test
+	void nearbyByCityNameIncludesStationsMatchedByMunicipalityAndProvinceCode() {
+		Station station = station(1L, 45.465, 9.191);
+		City city = station.getCity();
+		city.setLatitude(45.4642);
+		city.setLongitude(9.1900);
+		when(cityRepository.findByNameAndOptionalProvince("Milano", "Milano")).thenReturn(List.of(city));
+		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of());
+		when(stationRepository.findStationsByMunicipalityAndProvinceCode("Milano", "MI", "BENZINA", true))
+				.thenReturn(List.of(station));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
+
+		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findNearby(null, null, null, "Milano",
+				"Milano", 10.0, "BENZINA", true, 1);
+
+		assertThat(result).hasSize(1);
+		assertThat(result.getFirst().id()).isEqualTo(1L);
+	}
+
 	private Station station() {
 		return station(1L, 45.46, 9.19);
 	}

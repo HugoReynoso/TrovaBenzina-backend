@@ -1,6 +1,7 @@
 package it.trovabenzina.service;
 
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -74,10 +75,7 @@ public class StationService {
 		int safeLimit = limit == null ? 50 : Math.max(1, Math.min(limit, 200));
 		String normalizedFuelType = normalizeFuelType(fuelType);
 
-		List<Station> cityStations = center.cityId() == null ? List.of()
-				: stationRepository.findStations(center.cityId(), normalizedFuelType, selfService).stream()
-						.filter(this::hasCoordinates)
-						.toList();
+		List<Station> cityStations = findExactCityStations(center, normalizedFuelType, selfService);
 		if (cityStations.size() >= safeLimit) {
 			Map<Long, Double> distancesByStation = distancesByStation(cityStations, center.lat(), center.lng());
 			return mapWithPricesAndDistances(cityStations.stream()
@@ -140,13 +138,14 @@ public class StationService {
 			if (lat == null || lng == null) {
 				throw new IllegalArgumentException("lat and lng must be provided together");
 			}
-			return new SearchCenter(lat, lng, null);
+			return new SearchCenter(lat, lng, null, null, null);
 		}
 		City city = resolveCity(cityId, cityName, province);
 		if (city.getLatitude() == null || city.getLongitude() == null) {
 			throw new IllegalArgumentException("City has no coordinates");
 		}
-		return new SearchCenter(city.getLatitude(), city.getLongitude(), city.getId());
+		return new SearchCenter(city.getLatitude(), city.getLongitude(), city.getId(), city.getName(),
+				city.getProvince() == null ? null : city.getProvince().getCode());
 	}
 
 	private City resolveCity(Long cityId, String cityName, String province) {
@@ -163,6 +162,18 @@ public class StationService {
 
 	private String normalizeSearchText(String value) {
 		return value == null || value.isBlank() ? null : value.trim();
+	}
+
+	private List<Station> findExactCityStations(SearchCenter center, String fuelType, Boolean selfService) {
+		if (center.cityId() == null) {
+			return List.of();
+		}
+		List<Station> stations = new ArrayList<>(stationRepository.findStations(center.cityId(), fuelType, selfService));
+		if (center.cityName() != null && center.provinceCode() != null) {
+			stations.addAll(stationRepository.findStationsByMunicipalityAndProvinceCode(center.cityName(),
+					center.provinceCode(), fuelType, selfService));
+		}
+		return distinctById(stations).stream().filter(this::hasCoordinates).toList();
 	}
 
 	private Map<Long, Double> distancesByStation(List<Station> stations, double lat, double lng) {
@@ -190,6 +201,6 @@ public class StationService {
 		return Math.round(value * 100.0) / 100.0;
 	}
 
-	private record SearchCenter(double lat, double lng, Long cityId) {
+	private record SearchCenter(double lat, double lng, Long cityId, String cityName, String provinceCode) {
 	}
 }
