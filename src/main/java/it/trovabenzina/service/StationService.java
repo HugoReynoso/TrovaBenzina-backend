@@ -63,13 +63,19 @@ public class StationService {
 	@Transactional(readOnly = true)
 	public List<StationResponseDto> findNearby(Double lat, Double lng, Long cityId, Double radiusKm, String fuelType,
 			Boolean selfService, Integer limit) {
-		SearchCenter center = resolveSearchCenter(lat, lng, cityId);
+		return findNearby(lat, lng, cityId, null, null, radiusKm, fuelType, selfService, limit);
+	}
+
+	@Transactional(readOnly = true)
+	public List<StationResponseDto> findNearby(Double lat, Double lng, Long cityId, String cityName, String province,
+			Double radiusKm, String fuelType, Boolean selfService, Integer limit) {
+		SearchCenter center = resolveSearchCenter(lat, lng, cityId, cityName, province);
 		double safeRadiusKm = radiusKm == null ? 10.0 : Math.max(0.1, Math.min(radiusKm, 100.0));
 		int safeLimit = limit == null ? 50 : Math.max(1, Math.min(limit, 200));
 		String normalizedFuelType = normalizeFuelType(fuelType);
 
-		List<Station> cityStations = cityId == null ? List.of()
-				: stationRepository.findStations(cityId, normalizedFuelType, selfService).stream()
+		List<Station> cityStations = center.cityId() == null ? List.of()
+				: stationRepository.findStations(center.cityId(), normalizedFuelType, selfService).stream()
 						.filter(this::hasCoordinates)
 						.toList();
 		if (cityStations.size() >= safeLimit) {
@@ -129,21 +135,34 @@ public class StationService {
 		return uniqueStations.values().stream().toList();
 	}
 
-	private SearchCenter resolveSearchCenter(Double lat, Double lng, Long cityId) {
+	private SearchCenter resolveSearchCenter(Double lat, Double lng, Long cityId, String cityName, String province) {
 		if (lat != null || lng != null) {
 			if (lat == null || lng == null) {
 				throw new IllegalArgumentException("lat and lng must be provided together");
 			}
-			return new SearchCenter(lat, lng);
+			return new SearchCenter(lat, lng, null);
 		}
-		if (cityId == null) {
-			throw new IllegalArgumentException("Either cityId or lat/lng is required");
-		}
-		City city = cityRepository.findById(cityId).orElseThrow(() -> new CityNotFoundException(cityId));
+		City city = resolveCity(cityId, cityName, province);
 		if (city.getLatitude() == null || city.getLongitude() == null) {
 			throw new IllegalArgumentException("City has no coordinates");
 		}
-		return new SearchCenter(city.getLatitude(), city.getLongitude());
+		return new SearchCenter(city.getLatitude(), city.getLongitude(), city.getId());
+	}
+
+	private City resolveCity(Long cityId, String cityName, String province) {
+		if (cityId != null) {
+			return cityRepository.findById(cityId).orElseThrow(() -> new CityNotFoundException(cityId));
+		}
+		if (cityName == null || cityName.isBlank()) {
+			throw new IllegalArgumentException("Either cityId, cityName or lat/lng is required");
+		}
+		return cityRepository.findByNameAndOptionalProvince(cityName.trim(), normalizeSearchText(province)).stream()
+				.findFirst()
+				.orElseThrow(() -> new IllegalArgumentException("City not found with name " + cityName));
+	}
+
+	private String normalizeSearchText(String value) {
+		return value == null || value.isBlank() ? null : value.trim();
 	}
 
 	private Map<Long, Double> distancesByStation(List<Station> stations, double lat, double lng) {
@@ -171,6 +190,6 @@ public class StationService {
 		return Math.round(value * 100.0) / 100.0;
 	}
 
-	private record SearchCenter(double lat, double lng) {
+	private record SearchCenter(double lat, double lng, Long cityId) {
 	}
 }

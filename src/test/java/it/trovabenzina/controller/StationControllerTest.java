@@ -38,7 +38,7 @@ class StationControllerTest {
 
 	@Test
 	void nearbyEndpointReturnsStationsWithDistance() throws Exception {
-		when(stationService.findNearby(45.4642, 9.1900, null, 10.0, "BENZINA", true, 5))
+		when(stationService.findNearby(45.4642, 9.1900, null, null, null, 10.0, "BENZINA", true, 5))
 				.thenReturn(List.of(stationWithDistance()));
 
 		mockMvc.perform(get("/api/stations/nearby")
@@ -51,6 +51,22 @@ class StationControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].name").value("Station Test"))
 				.andExpect(jsonPath("$[0].distanceKm").value(1.23));
+	}
+
+	@Test
+	void nearbyEndpointAcceptsCityAndProvinceNames() throws Exception {
+		when(stationService.findNearby(null, null, null, "Milano", "Milano", 10.0, "BENZINA", true, 5))
+				.thenReturn(List.of(stationWithDistance()));
+
+		mockMvc.perform(get("/api/stations/nearby")
+				.param("city", "Milano")
+				.param("province", "Milano")
+				.param("radiusKm", "10")
+				.param("fuelType", "BENZINA")
+				.param("selfService", "true")
+				.param("limit", "5"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].cityName").value("Milano"));
 	}
 
 	private StationResponseDto station() {
