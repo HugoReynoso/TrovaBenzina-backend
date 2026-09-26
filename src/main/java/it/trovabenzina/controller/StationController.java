@@ -23,8 +23,11 @@ public class StationController {
 
 	@GetMapping
 	public List<StationResponseDto> findAll(@RequestParam(required = false) Long cityId,
-			@RequestParam(required = false) String fuelType, @RequestParam(required = false) Boolean selfService) {
-		return stationService.findAll(cityId, fuelType, selfService);
+			@RequestParam(required = false) Long provinceId, @RequestParam(required = false) String fuelType,
+			@RequestParam(required = false) Boolean selfService, @RequestParam(required = false) Integer limit,
+			@RequestParam(required = false) Double minLat, @RequestParam(required = false) Double maxLat,
+			@RequestParam(required = false) Double minLng, @RequestParam(required = false) Double maxLng) {
+		return stationService.findAll(cityId, provinceId, fuelType, selfService, limit, minLat, maxLat, minLng, maxLng);
 	}
 
 	@GetMapping("/nearby")
@@ -39,15 +42,16 @@ public class StationController {
 				firstPresent(province, provinceCode, provinceName), radiusKm, fuelType, selfService, limit);
 	}
 
-	@GetMapping("/{id}")
+	@GetMapping("/{id:\\d+}")
 	public StationResponseDto findById(@PathVariable Long id) {
 		return stationService.findById(id);
 	}
 
 	@GetMapping("/cheapest")
-	public List<StationResponseDto> cheapest(@RequestParam(required = false) Long cityId, @RequestParam String fuelType,
+	public List<StationResponseDto> cheapest(@RequestParam(required = false) Long cityId,
+			@RequestParam(required = false) Long provinceId, @RequestParam String fuelType,
 			@RequestParam(required = false) Boolean selfService, @RequestParam(required = false) Integer limit) {
-		return stationService.findCheapest(cityId, fuelType, selfService, limit);
+		return stationService.findCheapest(cityId, provinceId, fuelType, selfService, limit);
 	}
 
 	private String firstPresent(String... values) {

@@ -1,8 +1,11 @@
 package it.trovabenzina.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -23,7 +26,10 @@ import it.trovabenzina.entity.Province;
 import it.trovabenzina.entity.Region;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
+import it.trovabenzina.exception.ProvinceNotFoundException;
 import it.trovabenzina.repository.CityRepository;
+import it.trovabenzina.repository.FuelTypeRepository;
+import it.trovabenzina.repository.ProvinceRepository;
 import it.trovabenzina.repository.StationPriceRepository;
 import it.trovabenzina.repository.StationRepository;
 
@@ -39,6 +45,12 @@ class StationServiceTest {
 	@Mock
 	private CityRepository cityRepository;
 
+	@Mock
+	private ProvinceRepository provinceRepository;
+
+	@Mock
+	private FuelTypeRepository fuelTypeRepository;
+
 	@InjectMocks
 	private StationService stationService;
 
@@ -46,36 +58,90 @@ class StationServiceTest {
 	void findAllReturnsStationsWithFilteredPrices() {
 		Station station = station();
 		StationPrice price = price(station, "BENZINA", true);
-		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of(station));
+		mockFuelType("BENZINA");
+		when(stationRepository.findStations(eq(1L), isNull(), eq("BENZINA"), eq(true), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of(station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price));
 
-		assertThat(stationService.findAll(1L, "BENZINA", true).getFirst().prices()).hasSize(1);
+		assertThat(stationService.findAll(1L, null, "BENZINA", true, null, null, null, null, null).getFirst().prices())
+				.hasSize(1);
+	}
+
+	@Test
+	void findAllFiltersByProvinceFuelAndSelfService() {
+		Station station = station();
+		StationPrice selfPrice = price(station, "BENZINA", true);
+		StationPrice servedPrice = price(station, "BENZINA", false);
+		when(provinceRepository.existsById(1L)).thenReturn(true);
+		mockFuelType("BENZINA");
+		when(stationRepository.findStations(isNull(), eq(1L), eq("BENZINA"), eq(true), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of(station));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(selfPrice, servedPrice));
+
+		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findAll(null, 1L, "BENZINA", true, 1500,
+				null, null, null, null);
+
+		assertThat(result).hasSize(1);
+		assertThat(result.getFirst().prices()).hasSize(1);
+		assertThat(result.getFirst().prices().getFirst().selfService()).isTrue();
+	}
+
+	@Test
+	void findAllReturnsEmptyWithoutCityProvinceOrBounds() {
+		assertThat(stationService.findAll(null, null, null, null, null, null, null, null, null)).isEmpty();
+
+		verifyNoInteractions(stationRepository);
+	}
+
+	@Test
+	void findAllRejectsUnknownProvince() {
+		when(provinceRepository.existsById(99L)).thenReturn(false);
+
+		assertThatThrownBy(() -> stationService.findAll(null, 99L, null, null, null, null, null, null, null))
+				.isInstanceOf(ProvinceNotFoundException.class);
+
+		verifyNoInteractions(stationRepository);
 	}
 
 	@Test
 	void cheapestDefaultsLimitAndMapsPrices() {
 		Station station = station();
-		when(stationRepository.findCheapest(eq(1L), eq("BENZINA"), eq(true), any(Pageable.class)))
+		mockFuelType("BENZINA");
+		when(stationRepository.findCheapest(eq(1L), isNull(), eq("BENZINA"), eq(true), any(Pageable.class)))
 				.thenReturn(List.of(station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
 
-		assertThat(stationService.findCheapest(1L, "BENZINA", true, null)).hasSize(1);
+		assertThat(stationService.findCheapest(1L, null, "BENZINA", true, null)).hasSize(1);
+	}
+
+	@Test
+	void cheapestFiltersByProvince() {
+		Station station = station();
+		when(provinceRepository.existsById(1L)).thenReturn(true);
+		mockFuelType("BENZINA");
+		when(stationRepository.findCheapest(isNull(), eq(1L), eq("BENZINA"), eq(true), any(Pageable.class)))
+				.thenReturn(List.of(station));
+		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
+
+		assertThat(stationService.findCheapest(null, 1L, "BENZINA", true, 200)).hasSize(1);
 	}
 
 	@Test
 	void cheapestRemovesDuplicateStationsKeepingPriceOrder() {
 		Station station = station();
-		when(stationRepository.findCheapest(eq(1L), eq("BENZINA"), eq(null), any(Pageable.class)))
+		mockFuelType("BENZINA");
+		when(stationRepository.findCheapest(eq(1L), isNull(), eq("BENZINA"), eq(null), any(Pageable.class)))
 				.thenReturn(List.of(station, station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
 
-		assertThat(stationService.findCheapest(1L, "BENZINA", null, 10)).hasSize(1);
+		assertThat(stationService.findCheapest(1L, null, "BENZINA", null, 10)).hasSize(1);
 	}
 
 	@Test
 	void nearbyFiltersByCoordinatesAndReturnsDistance() {
 		Station near = station(1L, 45.465, 9.191);
 		Station far = station(2L, 45.900, 9.800);
+		mockFuelType("BENZINA");
 		when(stationRepository.findNearbyCandidates("BENZINA", true)).thenReturn(List.of(far, near));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(near, "BENZINA", true)));
 
@@ -93,8 +159,10 @@ class StationServiceTest {
 		City city = station.getCity();
 		city.setLatitude(45.4642);
 		city.setLongitude(9.1900);
+		mockFuelType("BENZINA");
 		when(cityRepository.findById(1L)).thenReturn(Optional.of(city));
-		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of(station));
+		when(stationRepository.findStations(eq(1L), isNull(), eq("BENZINA"), eq(true), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of(station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
 
 		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findNearby(null, null, 1L, 10.0, "BENZINA",
@@ -110,8 +178,10 @@ class StationServiceTest {
 		City city = station.getCity();
 		city.setLatitude(45.4642);
 		city.setLongitude(9.1900);
+		mockFuelType("BENZINA");
 		when(cityRepository.findByNameAndOptionalProvince("Milano", "Milano")).thenReturn(List.of(city));
-		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of(station));
+		when(stationRepository.findStations(eq(1L), isNull(), eq("BENZINA"), eq(true), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of(station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
 
 		List<it.trovabenzina.dto.StationResponseDto> result = stationService.findNearby(null, null, null, "Milano",
@@ -127,8 +197,10 @@ class StationServiceTest {
 		City city = station.getCity();
 		city.setLatitude(45.4642);
 		city.setLongitude(9.1900);
+		mockFuelType("BENZINA");
 		when(cityRepository.findByNameAndOptionalProvince("Milano", "Milano")).thenReturn(List.of(city));
-		when(stationRepository.findStations(1L, "BENZINA", true)).thenReturn(List.of());
+		when(stationRepository.findStations(eq(1L), isNull(), eq("BENZINA"), eq(true), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of());
 		when(stationRepository.findStationsByMunicipalityAndProvinceCode("Milano", "MI", "BENZINA", true))
 				.thenReturn(List.of(station));
 		when(stationPriceRepository.findByStationIdIn(List.of(1L))).thenReturn(List.of(price(station, "BENZINA", true)));
@@ -149,11 +221,20 @@ class StationServiceTest {
 			candidates.add(station);
 			prices.add(price(station, "BENZINA", true));
 		}
+		mockFuelType("BENZINA");
 		when(stationRepository.findNearbyCandidates("BENZINA", true)).thenReturn(candidates);
 		when(stationPriceRepository.findByStationIdIn(any())).thenReturn(prices);
 
 		assertThat(stationService.findNearby(45.4642, 9.1900, null, 10.0, "BENZINA", true, null)).hasSize(250);
 		assertThat(stationService.findNearby(45.4642, 9.1900, null, 10.0, "BENZINA", true, 999)).hasSize(800);
+	}
+
+	@Test
+	void invalidFuelTypeIsRejected() {
+		when(fuelTypeRepository.findByCodeIgnoreCase("UNKNOWN")).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> stationService.findCheapest(null, null, "UNKNOWN", true, null))
+				.isInstanceOf(IllegalArgumentException.class);
 	}
 
 	private Station station() {
@@ -196,5 +277,17 @@ class StationServiceTest {
 		price.setPrice(new BigDecimal("1.759"));
 		price.setSelfService(selfService);
 		return price;
+	}
+
+	private void mockFuelType(String code) {
+		when(fuelTypeRepository.findByCodeIgnoreCase(code)).thenReturn(Optional.of(fuelType(code)));
+	}
+
+	private FuelType fuelType(String code) {
+		FuelType fuelType = new FuelType();
+		fuelType.setId(1L);
+		fuelType.setCode(code);
+		fuelType.setName(code);
+		return fuelType;
 	}
 }

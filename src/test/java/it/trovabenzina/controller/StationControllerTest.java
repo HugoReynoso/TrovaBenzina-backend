@@ -29,11 +29,30 @@ class StationControllerTest {
 
 	@Test
 	void stationsEndpointReturnsStations() throws Exception {
-		when(stationService.findAll(1L, "BENZINA", true)).thenReturn(List.of(station()));
+		when(stationService.findAll(1L, null, "BENZINA", true, null, null, null, null, null))
+				.thenReturn(List.of(station()));
 
 		mockMvc.perform(get("/api/stations").param("cityId", "1").param("fuelType", "BENZINA").param("selfService", "true"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].name").value("Station Test"));
+	}
+
+	@Test
+	void stationsEndpointAcceptsProvinceLimitAndBounds() throws Exception {
+		when(stationService.findAll(null, 1L, "BENZINA", true, 1500, 45.0, 46.0, 9.0, 10.0))
+				.thenReturn(List.of(station()));
+
+		mockMvc.perform(get("/api/stations")
+				.param("provinceId", "1")
+				.param("fuelType", "BENZINA")
+				.param("selfService", "true")
+				.param("limit", "1500")
+				.param("minLat", "45.0")
+				.param("maxLat", "46.0")
+				.param("minLng", "9.0")
+				.param("maxLng", "10.0"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].cityName").value("Milano"));
 	}
 
 	@Test
@@ -67,6 +86,19 @@ class StationControllerTest {
 				.param("limit", "5"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].cityName").value("Milano"));
+	}
+
+	@Test
+	void cheapestEndpointAcceptsProvince() throws Exception {
+		when(stationService.findCheapest(null, 1L, "BENZINA", true, 20)).thenReturn(List.of(station()));
+
+		mockMvc.perform(get("/api/stations/cheapest")
+				.param("provinceId", "1")
+				.param("fuelType", "BENZINA")
+				.param("selfService", "true")
+				.param("limit", "20"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].name").value("Station Test"));
 	}
 
 	private StationResponseDto station() {

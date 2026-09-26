@@ -3,6 +3,7 @@ package it.trovabenzina.repository;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -23,13 +24,21 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			left join s.city.province.region r
 			left join StationPrice sp on sp.station = s
 			left join sp.fuelType ft
-			where (:cityId is null or c.id = :cityId)
+			where s.active = true
+			  and (:cityId is null or c.id = :cityId)
+			  and (:provinceId is null or p.id = :provinceId)
 			  and (:fuelType is null or upper(ft.code) = upper(:fuelType))
 			  and (:selfService is null or sp.selfService = :selfService)
+			  and (:minLat is null or s.latitude >= :minLat)
+			  and (:maxLat is null or s.latitude <= :maxLat)
+			  and (:minLng is null or s.longitude >= :minLng)
+			  and (:maxLng is null or s.longitude <= :maxLng)
 			order by s.name asc
 			""")
-	List<Station> findStations(@Param("cityId") Long cityId, @Param("fuelType") String fuelType,
-			@Param("selfService") Boolean selfService);
+	List<Station> findStations(@Param("cityId") Long cityId, @Param("provinceId") Long provinceId,
+			@Param("fuelType") String fuelType, @Param("selfService") Boolean selfService,
+			@Param("minLat") Double minLat, @Param("maxLat") Double maxLat, @Param("minLng") Double minLng,
+			@Param("maxLng") Double maxLng, Pageable pageable);
 
 	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
 	@Query("""
@@ -48,13 +57,15 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			join fetch p.region r
 			join StationPrice sp on sp.station = s
 			join sp.fuelType ft
-			where (:cityId is null or c.id = :cityId)
+			where s.active = true
+			  and (:cityId is null or c.id = :cityId)
+			  and (:provinceId is null or p.id = :provinceId)
 			  and upper(ft.code) = upper(:fuelType)
 			  and (:selfService is null or sp.selfService = :selfService)
 			order by sp.price asc
 			""")
-	List<Station> findCheapest(@Param("cityId") Long cityId, @Param("fuelType") String fuelType,
-			@Param("selfService") Boolean selfService, org.springframework.data.domain.Pageable pageable);
+	List<Station> findCheapest(@Param("cityId") Long cityId, @Param("provinceId") Long provinceId,
+			@Param("fuelType") String fuelType, @Param("selfService") Boolean selfService, Pageable pageable);
 
 	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
 	@Query("""

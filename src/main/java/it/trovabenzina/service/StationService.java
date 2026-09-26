@@ -17,9 +17,12 @@ import it.trovabenzina.entity.City;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
 import it.trovabenzina.exception.CityNotFoundException;
+import it.trovabenzina.exception.ProvinceNotFoundException;
 import it.trovabenzina.exception.StationNotFoundException;
 import it.trovabenzina.mapper.StationMapper;
 import it.trovabenzina.repository.CityRepository;
+import it.trovabenzina.repository.FuelTypeRepository;
+import it.trovabenzina.repository.ProvinceRepository;
 import it.trovabenzina.repository.StationPriceRepository;
 import it.trovabenzina.repository.StationRepository;
 
@@ -29,18 +32,31 @@ public class StationService {
 	private final StationRepository stationRepository;
 	private final StationPriceRepository stationPriceRepository;
 	private final CityRepository cityRepository;
+	private final ProvinceRepository provinceRepository;
+	private final FuelTypeRepository fuelTypeRepository;
 
 	public StationService(StationRepository stationRepository, StationPriceRepository stationPriceRepository,
-			CityRepository cityRepository) {
+			CityRepository cityRepository, ProvinceRepository provinceRepository, FuelTypeRepository fuelTypeRepository) {
 		this.stationRepository = stationRepository;
 		this.stationPriceRepository = stationPriceRepository;
 		this.cityRepository = cityRepository;
+		this.provinceRepository = provinceRepository;
+		this.fuelTypeRepository = fuelTypeRepository;
 	}
 
 	@Transactional(readOnly = true)
-	public List<StationResponseDto> findAll(Long cityId, String fuelType, Boolean selfService) {
-		List<Station> stations = stationRepository.findStations(cityId, normalizeFuelType(fuelType), selfService);
-		return mapWithPrices(stations, normalizeFuelType(fuelType), selfService);
+	public List<StationResponseDto> findAll(Long cityId, Long provinceId, String fuelType, Boolean selfService,
+			Integer limit, Double minLat, Double maxLat, Double minLng, Double maxLng) {
+		if (cityId == null && provinceId == null && !hasBounds(minLat, maxLat, minLng, maxLng)) {
+			return List.of();
+		}
+		Long effectiveProvinceId = cityId == null ? provinceId : null;
+		validateProvince(effectiveProvinceId);
+		String normalizedFuelType = normalizeAndValidateFuelType(fuelType);
+		int safeLimit = limit == null ? 250 : Math.max(1, Math.min(limit, 1500));
+		List<Station> stations = stationRepository.findStations(cityId, effectiveProvinceId, normalizedFuelType,
+				selfService, minLat, maxLat, minLng, maxLng, PageRequest.of(0, safeLimit));
+		return mapWithPrices(stations, normalizedFuelType, selfService);
 	}
 
 	@Transactional(readOnly = true)
@@ -51,14 +67,18 @@ public class StationService {
 	}
 
 	@Transactional(readOnly = true)
-	public List<StationResponseDto> findCheapest(Long cityId, String fuelType, Boolean selfService, Integer limit) {
+	public List<StationResponseDto> findCheapest(Long cityId, Long provinceId, String fuelType, Boolean selfService,
+			Integer limit) {
 		if (fuelType == null || fuelType.isBlank()) {
 			throw new IllegalArgumentException("fuelType is required for cheapest stations");
 		}
-		int safeLimit = limit == null ? 10 : Math.max(1, Math.min(limit, 100));
-		List<Station> stations = stationRepository.findCheapest(cityId, fuelType.trim(), selfService,
-				PageRequest.of(0, safeLimit));
-		return mapWithPrices(distinctById(stations), fuelType.trim(), selfService);
+		Long effectiveProvinceId = cityId == null ? provinceId : null;
+		validateProvince(effectiveProvinceId);
+		String normalizedFuelType = normalizeAndValidateFuelType(fuelType);
+		int safeLimit = limit == null ? 10 : Math.max(1, Math.min(limit, 200));
+		List<Station> stations = stationRepository.findCheapest(cityId, effectiveProvinceId, normalizedFuelType,
+				selfService, PageRequest.of(0, safeLimit));
+		return mapWithPrices(distinctById(stations), normalizedFuelType, selfService);
 	}
 
 	@Transactional(readOnly = true)
@@ -73,7 +93,7 @@ public class StationService {
 		SearchCenter center = resolveSearchCenter(lat, lng, cityId, cityName, province);
 		double safeRadiusKm = radiusKm == null ? 10.0 : Math.max(0.1, Math.min(radiusKm, 100.0));
 		int safeLimit = limit == null ? 250 : Math.max(1, Math.min(limit, 800));
-		String normalizedFuelType = normalizeFuelType(fuelType);
+		String normalizedFuelType = normalizeAndValidateFuelType(fuelType);
 
 		List<Station> cityStations = findExactCityStations(center, normalizedFuelType, selfService);
 		if (cityStations.size() >= safeLimit) {
@@ -125,6 +145,24 @@ public class StationService {
 		return fuelType == null || fuelType.isBlank() ? null : fuelType.trim();
 	}
 
+	private String normalizeAndValidateFuelType(String fuelType) {
+		String normalizedFuelType = normalizeFuelType(fuelType);
+		if (normalizedFuelType != null && fuelTypeRepository.findByCodeIgnoreCase(normalizedFuelType).isEmpty()) {
+			throw new IllegalArgumentException("Invalid fuelType " + normalizedFuelType);
+		}
+		return normalizedFuelType;
+	}
+
+	private void validateProvince(Long provinceId) {
+		if (provinceId != null && !provinceRepository.existsById(provinceId)) {
+			throw new ProvinceNotFoundException(provinceId);
+		}
+	}
+
+	private boolean hasBounds(Double minLat, Double maxLat, Double minLng, Double maxLng) {
+		return minLat != null || maxLat != null || minLng != null || maxLng != null;
+	}
+
 	private List<Station> distinctById(List<Station> stations) {
 		Map<Long, Station> uniqueStations = new LinkedHashMap<>();
 		for (Station station : stations) {
@@ -168,7 +206,8 @@ public class StationService {
 		if (center.cityId() == null) {
 			return List.of();
 		}
-		List<Station> stations = new ArrayList<>(stationRepository.findStations(center.cityId(), fuelType, selfService));
+		List<Station> stations = new ArrayList<>(stationRepository.findStations(center.cityId(), null, fuelType,
+				selfService, null, null, null, null, PageRequest.of(0, 800)));
 		if (center.cityName() != null && center.provinceCode() != null) {
 			stations.addAll(stationRepository.findStationsByMunicipalityAndProvinceCode(center.cityName(),
 					center.provinceCode(), fuelType, selfService));
