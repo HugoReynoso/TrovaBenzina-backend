@@ -3,12 +3,20 @@ package it.trovabenzina.integration.mimit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class MimitCsvParserTest {
 
 	private final MimitCsvParser parser = new MimitCsvParser();
+
+	@TempDir
+	private Path tempDir;
 
 	@Test
 	void parsesPipeSeparatedStationRows() {
@@ -91,5 +99,28 @@ class MimitCsvParserTest {
 			assertThat(record.fuelTypeCode()).isEqualTo("DIESEL");
 			assertThat(record.selfService()).isFalse();
 		});
+	}
+
+	@Test
+	void streamsPriceRowsInBatchesFromFile() throws Exception {
+		String csv = """
+				Estrazione del 2026-09-20
+				idImpianto|desc_carburante|prezzo|is_self|dtComu
+				123|Benzina|1.789|1|22/09/2026 08:30:00
+				124|Gasolio|1.700|0|2026-09-22 09:00:00
+				125|GPL|0.750|1|2026-09-22 09:30:00
+				""";
+		Path path = tempDir.resolve("prices.csv");
+		Files.writeString(path, csv);
+		List<List<MimitPriceRecord>> batches = new ArrayList<>();
+
+		parser.parsePrices(path, 2, batches::add, ignored -> {
+		});
+
+		assertThat(batches).hasSize(2);
+		assertThat(batches.getFirst()).hasSize(2);
+		assertThat(batches.get(1)).hasSize(1);
+		assertThat(batches.getFirst().getFirst().fuelTypeCode()).isEqualTo("BENZINA");
+		assertThat(batches.getFirst().get(1).fuelTypeCode()).isEqualTo("DIESEL");
 	}
 }

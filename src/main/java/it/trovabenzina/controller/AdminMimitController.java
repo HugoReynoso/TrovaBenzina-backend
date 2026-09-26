@@ -22,4 +22,14 @@ public class AdminMimitController {
 	public MimitImportResult importMimitData() {
 		return importService.importData();
 	}
+
+	@PostMapping("/import/stations")
+	public MimitImportResult importMimitStations() {
+		return importService.importStations();
+	}
+
+	@PostMapping("/import/prices")
+	public MimitImportResult importMimitPrices() {
+		return importService.importPrices();
+	}
 }

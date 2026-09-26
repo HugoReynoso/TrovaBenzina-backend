@@ -1,5 +1,6 @@
 package it.trovabenzina.repository;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -16,6 +17,17 @@ public interface CityRepository extends JpaRepository<City, Long> {
 
 	@EntityGraph(attributePaths = { "province", "province.region" })
 	List<City> findByProvinceIdOrderByNameAsc(Long provinceId);
+
+	@EntityGraph(attributePaths = { "province", "province.region" })
+	@Query("""
+			select c
+			from City c
+			join c.province p
+			where upper(c.name) in :names
+			  and upper(p.code) in :provinceCodes
+			""")
+	List<City> findByNamesAndProvinceCodes(@Param("names") Collection<String> names,
+			@Param("provinceCodes") Collection<String> provinceCodes);
 
 	java.util.Optional<City> findFirstByNameIgnoreCaseAndProvinceCodeIgnoreCase(String name, String provinceCode);
 

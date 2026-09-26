@@ -1,5 +1,6 @@
 package it.trovabenzina.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,9 @@ import it.trovabenzina.entity.Station;
 public interface StationRepository extends JpaRepository<Station, Long> {
 
 	Optional<Station> findByMimitId(String mimitId);
+
+	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
+	List<Station> findByMimitIdIn(Collection<String> mimitIds);
 
 	@EntityGraph(attributePaths = { "city", "city.province", "city.province.region" })
 	@Query("""

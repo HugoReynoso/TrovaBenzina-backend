@@ -1,5 +1,6 @@
 package it.trovabenzina.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,17 @@ public interface StationPriceRepository extends JpaRepository<StationPrice, Long
 
 	@EntityGraph(attributePaths = { "fuelType" })
 	List<StationPrice> findByStationIdIn(List<Long> stationIds);
+
+	@Query("""
+			select sp
+			from StationPrice sp
+			join fetch sp.station s
+			join fetch sp.fuelType ft
+			where s.id in :stationIds
+			  and ft.id in :fuelTypeIds
+			""")
+	List<StationPrice> findCurrentByStationIdInAndFuelTypeIdIn(@Param("stationIds") Collection<Long> stationIds,
+			@Param("fuelTypeIds") Collection<Long> fuelTypeIds);
 
 	@Query("""
 			select avg(sp.price), min(sp.price), max(sp.price), count(distinct sp.station.id), max(sp.communicatedAt)

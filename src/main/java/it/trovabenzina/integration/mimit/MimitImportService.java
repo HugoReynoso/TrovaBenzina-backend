@@ -1,10 +1,15 @@
 package it.trovabenzina.integration.mimit;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -30,11 +35,13 @@ import it.trovabenzina.repository.StationPriceHistoryRepository;
 import it.trovabenzina.repository.StationPriceRepository;
 import it.trovabenzina.repository.StationRepository;
 import it.trovabenzina.service.CityFuelStatisticService;
+import jakarta.persistence.EntityManager;
 
 @Service
 public class MimitImportService {
 
 	private static final Logger log = LoggerFactory.getLogger(MimitImportService.class);
+	private static final int PRICE_BATCH_SIZE = 1000;
 
 	private final MimitProperties properties;
 	private final MimitDownloadService downloadService;
@@ -46,12 +53,13 @@ public class MimitImportService {
 	private final CityRepository cityRepository;
 	private final CityFuelStatisticService statisticService;
 	private final TransactionTemplate transactionTemplate;
+	private final EntityManager entityManager;
 
 	public MimitImportService(MimitProperties properties, MimitDownloadService downloadService, MimitCsvParser csvParser,
 			StationRepository stationRepository, StationPriceRepository stationPriceRepository,
 			StationPriceHistoryRepository stationPriceHistoryRepository, FuelTypeRepository fuelTypeRepository,
 			CityRepository cityRepository, CityFuelStatisticService statisticService,
-			PlatformTransactionManager transactionManager) {
+			PlatformTransactionManager transactionManager, EntityManager entityManager) {
 		this.properties = properties;
 		this.downloadService = downloadService;
 		this.csvParser = csvParser;
@@ -62,43 +70,71 @@ public class MimitImportService {
 		this.cityRepository = cityRepository;
 		this.statisticService = statisticService;
 		this.transactionTemplate = new TransactionTemplate(transactionManager);
+		this.entityManager = entityManager;
 	}
 
 	public MimitImportResult importData() {
-		Instant startedAt = Instant.now();
-		log.info("Starting MIMIT import");
-
-		String stationsCsv = downloadService.download(properties.stationsUrl());
-		List<MimitStationRecord> stationRecords = csvParser.parseStations(stationsCsv);
-		String pricesCsv = downloadService.download(properties.pricesUrl());
-		List<MimitPriceRecord> priceRecords = csvParser.parsePrices(pricesCsv);
-
-		ImportState state = new ImportState(startedAt);
-		state.stationsRead = stationRecords.size();
-		state.pricesRead = priceRecords.size();
-
-		transactionTemplate.executeWithoutResult(status -> upsertStations(stationRecords, state));
-		Set<CityFuelPair> cityFuelPairs = transactionTemplate.execute(status -> upsertPrices(priceRecords, state));
-		if (cityFuelPairs != null) {
-			for (CityFuelPair pair : cityFuelPairs) {
-				statisticService.recalculate(pair.cityId(), pair.fuelType(), LocalDate.now());
-				state.statisticsUpdated++;
-			}
-		}
-
+		ImportState state = new ImportState(Instant.now());
+		log.info("Starting full MIMIT import");
+		importStationsInto(state);
+		importPricesInto(state);
 		MimitImportResult result = state.toResult(Instant.now());
-		log.info("Completed MIMIT import: {}", result);
+		log.info("Completed full MIMIT import: {}", result);
 		return result;
 	}
 
+	public MimitImportResult importStations() {
+		ImportState state = new ImportState(Instant.now());
+		log.info("Starting MIMIT stations import");
+		importStationsInto(state);
+		MimitImportResult result = state.toResult(Instant.now());
+		log.info("Completed MIMIT stations import: {}", result);
+		return result;
+	}
+
+	public MimitImportResult importPrices() {
+		ImportState state = new ImportState(Instant.now());
+		log.info("Starting MIMIT prices import");
+		importPricesInto(state);
+		MimitImportResult result = state.toResult(Instant.now());
+		log.info("Completed MIMIT prices import: {}", result);
+		return result;
+	}
+
+	private void importStationsInto(ImportState state) {
+		String stationsCsv = downloadService.download(properties.stationsUrl());
+		List<MimitStationRecord> stationRecords = csvParser.parseStations(stationsCsv);
+		state.stationsRead += stationRecords.size();
+		transactionTemplate.executeWithoutResult(status -> upsertStations(stationRecords, state));
+	}
+
+	private void importPricesInto(ImportState state) {
+		Path pricesFile = null;
+		Set<CityFuelPair> cityFuelPairs = new HashSet<>();
+		try {
+			pricesFile = downloadService.downloadToTempFile(properties.pricesUrl());
+			csvParser.parsePrices(pricesFile, PRICE_BATCH_SIZE, batch -> {
+				state.pricesRead += batch.size();
+				processPriceBatch(batch, state, cityFuelPairs);
+			}, state::skipPrice);
+			recalculateStatistics(cityFuelPairs, state);
+		} finally {
+			deleteTempFile(pricesFile);
+		}
+	}
+
 	private void upsertStations(List<MimitStationRecord> records, ImportState state) {
-		Map<String, Station> stationsByMimitId = stationRepository.findAll().stream()
-				.filter(station -> !isBlank(station.getMimitId()))
-				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
-		Map<String, City> citiesByNameProvince = cityRepository.findAllByOrderByNameAsc().stream()
-				.filter(city -> city.getProvince() != null && !isBlank(city.getProvince().getCode()))
-				.collect(Collectors.toMap(city -> cityKey(city.getName(), city.getProvince().getCode()), Function.identity(),
-						(left, right) -> left));
+		if (records.isEmpty()) {
+			return;
+		}
+		Set<String> stationMimitIds = records.stream().map(MimitStationRecord::mimitId).filter(value -> !isBlank(value))
+				.map(String::trim).collect(Collectors.toSet());
+		Map<String, Station> stationsByMimitId = stationMimitIds.isEmpty() ? new HashMap<>()
+				: stationRepository.findByMimitIdIn(stationMimitIds).stream()
+						.filter(station -> !isBlank(station.getMimitId()))
+						.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(),
+								(left, right) -> left));
+		Map<String, City> citiesByNameProvince = findCitiesForStations(records);
 		List<Station> stationsToSave = new ArrayList<>();
 		for (MimitStationRecord record : records) {
 			if (isBlank(record.mimitId())) {
@@ -121,9 +157,8 @@ public class MimitImportService {
 			if (city != null) {
 				station.setCity(city);
 			} else {
-				state.message(
-					"City not found for station " + record.mimitId() + " (" + record.municipality() + ", "
-							+ record.provinceCode() + "); station saved without city");
+				state.message("City not found for station " + record.mimitId() + " (" + record.municipality() + ", "
+						+ record.provinceCode() + "); station saved without city");
 			}
 			stationsToSave.add(station);
 			stationsByMimitId.put(mimitId, station);
@@ -134,41 +169,83 @@ public class MimitImportService {
 			}
 		}
 		stationRepository.saveAll(stationsToSave);
+		entityManager.flush();
+		entityManager.clear();
 	}
 
-	private Set<CityFuelPair> upsertPrices(List<MimitPriceRecord> records, ImportState state) {
-		Set<CityFuelPair> cityFuelPairs = new HashSet<>();
-		Map<String, Station> stationsByMimitId = stationRepository.findAll().stream()
-				.filter(station -> !isBlank(station.getMimitId()))
-				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
-		Map<String, FuelType> fuelTypesByCode = fuelTypeRepository.findAll().stream()
-				.filter(fuelType -> !isBlank(fuelType.getCode()))
-				.collect(Collectors.toMap(fuelType -> fuelType.getCode().trim().toUpperCase(Locale.ROOT),
-						Function.identity(), (left, right) -> left));
-		Map<PriceKey, StationPrice> currentPrices = stationPriceRepository.findAll().stream()
-				.filter(price -> price.getStation() != null && price.getStation().getId() != null
-						&& price.getFuelType() != null && price.getFuelType().getId() != null)
-				.collect(Collectors.toMap(price -> new PriceKey(price.getStation().getId(), price.getFuelType().getId(),
-						Boolean.TRUE.equals(price.getSelfService())), Function.identity(), (left, right) -> left));
-		List<StationPrice> pricesToSave = new ArrayList<>();
-		List<StationPriceHistory> historiesToSave = new ArrayList<>();
-		Set<PriceKey> pricesToSaveKeys = new HashSet<>();
-		LocalDateTime importedAt = LocalDateTime.now();
+	private Map<String, City> findCitiesForStations(List<MimitStationRecord> records) {
+		Set<String> cityNames = records.stream().map(MimitStationRecord::municipality).filter(value -> !isBlank(value))
+				.map(value -> value.trim().toUpperCase(Locale.ROOT)).collect(Collectors.toSet());
+		Set<String> provinceCodes = records.stream().map(MimitStationRecord::provinceCode).filter(value -> !isBlank(value))
+				.map(value -> value.trim().toUpperCase(Locale.ROOT)).collect(Collectors.toSet());
+		if (cityNames.isEmpty() || provinceCodes.isEmpty()) {
+			return Map.of();
+		}
+		return cityRepository.findByNamesAndProvinceCodes(cityNames, provinceCodes).stream()
+				.filter(city -> city.getProvince() != null && !isBlank(city.getProvince().getCode()))
+				.collect(Collectors.toMap(city -> cityKey(city.getName(), city.getProvince().getCode()), Function.identity(),
+						(left, right) -> left));
+	}
+
+	private void processPriceBatch(List<MimitPriceRecord> batch, ImportState state, Set<CityFuelPair> cityFuelPairs) {
+		try {
+			PriceBatchResult result = transactionTemplate.execute(status -> upsertPriceBatch(batch));
+			if (result != null) {
+				state.add(result);
+				cityFuelPairs.addAll(result.cityFuelPairs());
+			}
+		} catch (RuntimeException ex) {
+			state.errors++;
+			state.pricesSkipped += batch.size();
+			state.message("MIMIT price batch failed and was rolled back: " + ex.getMessage());
+			log.error("MIMIT price batch failed and was rolled back", ex);
+		}
+	}
+
+	private PriceBatchResult upsertPriceBatch(List<MimitPriceRecord> records) {
+		PriceBatchAccumulator result = new PriceBatchAccumulator();
+		Map<String, Station> stationsByMimitId = findStationsForPriceBatch(records);
+		Map<String, FuelType> fuelTypesByCode = loadFuelTypesByCode();
+		List<PriceRow> rows = new ArrayList<>(records.size());
+
 		for (MimitPriceRecord record : records) {
 			if (isBlank(record.stationMimitId()) || isBlank(record.fuelTypeCode()) || record.price() == null
 					|| record.price().signum() <= 0) {
-				state.skipPrice("Missing station, fuel or valid price");
+				result.pricesSkipped++;
 				continue;
 			}
 			Station station = stationsByMimitId.get(record.stationMimitId().trim());
 			if (station == null) {
-				state.skipPrice("Station not found for MIMIT id " + record.stationMimitId());
+				result.pricesSkipped++;
 				continue;
 			}
 			FuelType fuelType = resolveFuelType(record, fuelTypesByCode);
+			rows.add(new PriceRow(record, station, fuelType));
+		}
+		if (rows.isEmpty()) {
+			entityManager.clear();
+			return result.toResult();
+		}
+
+		Set<Long> stationIds = rows.stream().map(row -> row.station().getId()).collect(Collectors.toSet());
+		Set<Long> fuelTypeIds = rows.stream().map(row -> row.fuelType().getId()).collect(Collectors.toSet());
+		Map<PriceKey, StationPrice> currentPrices = stationPriceRepository
+				.findCurrentByStationIdInAndFuelTypeIdIn(stationIds, fuelTypeIds).stream()
+				.collect(Collectors.toMap(price -> new PriceKey(price.getStation().getId(), price.getFuelType().getId(),
+						Boolean.TRUE.equals(price.getSelfService())), Function.identity(), (left, right) -> left,
+						LinkedHashMap::new));
+
+		List<StationPrice> pricesToSave = new ArrayList<>();
+		List<StationPriceHistory> historiesToSave = new ArrayList<>();
+		Set<PriceKey> pricesToSaveKeys = new HashSet<>();
+		LocalDateTime importedAt = LocalDateTime.now();
+		for (PriceRow row : rows) {
+			MimitPriceRecord record = row.record();
+			Station station = row.station();
+			FuelType fuelType = row.fuelType();
 			PriceKey priceKey = new PriceKey(station.getId(), fuelType.getId(), Boolean.TRUE.equals(record.selfService()));
 			StationPrice price = currentPrices.getOrDefault(priceKey, new StationPrice());
-			boolean inserted = price.getId() == null;
+			boolean inserted = price.getId() == null && !pricesToSaveKeys.contains(priceKey);
 			boolean changed = inserted || hasPriceChanged(price, record);
 
 			price.setStation(station);
@@ -179,25 +256,53 @@ public class MimitImportService {
 			price.setImportedAt(importedAt);
 			if (pricesToSaveKeys.add(priceKey)) {
 				pricesToSave.add(price);
+				if (inserted) {
+					result.pricesInserted++;
+				} else {
+					result.pricesUpdated++;
+				}
 			}
 			currentPrices.put(priceKey, price);
 
 			if (changed) {
 				historiesToSave.add(toHistory(station, fuelType, record, importedAt));
-				state.historyInserted++;
+				result.historyInserted++;
 			}
 			if (station.getCity() != null) {
-				cityFuelPairs.add(new CityFuelPair(station.getCity().getId(), fuelType));
-			}
-			if (inserted) {
-				state.pricesInserted++;
-			} else {
-				state.pricesUpdated++;
+				result.cityFuelPairs.add(new CityFuelPair(station.getCity().getId(), fuelType.getCode()));
 			}
 		}
 		stationPriceRepository.saveAll(pricesToSave);
 		stationPriceHistoryRepository.saveAll(historiesToSave);
-		return cityFuelPairs;
+		entityManager.flush();
+		entityManager.clear();
+		return result.toResult();
+	}
+
+	private Map<String, Station> findStationsForPriceBatch(List<MimitPriceRecord> records) {
+		Set<String> stationMimitIds = records.stream().map(MimitPriceRecord::stationMimitId).filter(value -> !isBlank(value))
+				.map(String::trim).collect(Collectors.toSet());
+		if (stationMimitIds.isEmpty()) {
+			return Map.of();
+		}
+		return stationRepository.findByMimitIdIn(stationMimitIds).stream()
+				.filter(station -> !isBlank(station.getMimitId()))
+				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
+	}
+
+	private Map<String, FuelType> loadFuelTypesByCode() {
+		return fuelTypeRepository.findAll().stream().filter(fuelType -> !isBlank(fuelType.getCode()))
+				.collect(Collectors.toMap(fuelType -> fuelType.getCode().trim().toUpperCase(Locale.ROOT),
+						Function.identity(), (left, right) -> left, LinkedHashMap::new));
+	}
+
+	private void recalculateStatistics(Set<CityFuelPair> cityFuelPairs, ImportState state) {
+		for (CityFuelPair pair : cityFuelPairs) {
+			fuelTypeRepository.findByCodeIgnoreCase(pair.fuelTypeCode()).ifPresent(fuelType -> {
+				statisticService.recalculate(pair.cityId(), fuelType, LocalDate.now());
+				state.statisticsUpdated++;
+			});
+		}
 	}
 
 	private StationPriceHistory toHistory(Station station, FuelType fuelType, MimitPriceRecord record,
@@ -249,10 +354,41 @@ public class MimitImportService {
 		return value == null || value.isBlank();
 	}
 
-	private record CityFuelPair(Long cityId, FuelType fuelType) {
+	private void deleteTempFile(Path path) {
+		if (path == null) {
+			return;
+		}
+		try {
+			Files.deleteIfExists(path);
+		} catch (IOException ex) {
+			log.warn("Unable to delete temporary MIMIT file {}", path, ex);
+		}
+	}
+
+	private record CityFuelPair(Long cityId, String fuelTypeCode) {
 	}
 
 	private record PriceKey(Long stationId, Long fuelTypeId, Boolean selfService) {
+	}
+
+	private record PriceRow(MimitPriceRecord record, Station station, FuelType fuelType) {
+	}
+
+	private record PriceBatchResult(int pricesInserted, int pricesUpdated, int pricesSkipped, int historyInserted,
+			Set<CityFuelPair> cityFuelPairs) {
+	}
+
+	private static final class PriceBatchAccumulator {
+		private int pricesInserted;
+		private int pricesUpdated;
+		private int pricesSkipped;
+		private int historyInserted;
+		private final Set<CityFuelPair> cityFuelPairs = new HashSet<>();
+
+		private PriceBatchResult toResult() {
+			return new PriceBatchResult(pricesInserted, pricesUpdated, pricesSkipped, historyInserted,
+					Set.copyOf(cityFuelPairs));
+		}
 	}
 
 	private static final class ImportState {
@@ -272,6 +408,13 @@ public class MimitImportService {
 
 		private ImportState(Instant startedAt) {
 			this.startedAt = startedAt;
+		}
+
+		private void add(PriceBatchResult result) {
+			pricesInserted += result.pricesInserted();
+			pricesUpdated += result.pricesUpdated();
+			pricesSkipped += result.pricesSkipped();
+			historyInserted += result.historyInserted();
 		}
 
 		private void skipStation(String reason) {

@@ -1,8 +1,12 @@
 package it.trovabenzina.integration.mimit;
 
 import java.io.IOException;
+import java.io.Reader;
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -12,6 +16,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
@@ -110,23 +115,60 @@ public class MimitCsvParser {
 	public List<MimitPriceRecord> parsePrices(String csv) {
 		List<MimitPriceRecord> records = new ArrayList<>();
 		for (CSVRecord row : parseRecords(csv)) {
-			try {
-				String stationMimitId = first(row, "idimpianto", "id_impianto", "id impianto", "station_mimit_id");
-				String fuelName = first(row, "desc_carburante", "carburante", "fuel_type_name", "fuel", "nomecarburante");
-				BigDecimal price = parseBigDecimal(first(row, "prezzo", "price"));
-				if (isBlank(stationMimitId) || isBlank(fuelName) || price == null) {
-					log.warn("Skipping MIMIT price row {}: missing station, fuel or price", row.getRecordNumber());
-					continue;
-				}
-				records.add(new MimitPriceRecord(stationMimitId, normalizeFuelTypeName(first(row, "codice_carburante",
-						"fuel_type_code", "fuel_code", "carburante", "desc_carburante", "nomecarburante")), fuelName,
-						price, parseBoolean(first(row, "is_self", "self", "self_service", "tipo", "servito")),
-						parseDateTime(first(row, "dtcomu", "dt_comu", "data_comunicazione", "communicated_at"))));
-			} catch (RuntimeException ex) {
-				log.warn("Skipping malformed MIMIT price row {}: {}", row.getRecordNumber(), ex.getMessage());
+			MimitPriceRecord record = toPriceRecord(row, message -> log.warn("{}", message));
+			if (record != null) {
+				records.add(record);
 			}
 		}
 		return records;
+	}
+
+	public void parsePrices(Path csvPath, int batchSize, Consumer<List<MimitPriceRecord>> batchConsumer,
+			Consumer<String> skipConsumer) {
+		if (batchSize < 1) {
+			throw new IllegalArgumentException("batchSize must be greater than zero");
+		}
+		CSVFormat format = CSVFormat.DEFAULT.builder().setDelimiter(MIMIT_DELIMITER).setHeader().setQuote(null)
+				.setSkipHeaderRecord(true).setIgnoreEmptyLines(true).setTrim(true).build();
+		try (Reader reader = readerStartingAtFirstDelimitedLine(csvPath); CSVParser parser = format.parse(reader)) {
+			List<MimitPriceRecord> batch = new ArrayList<>(batchSize);
+			for (CSVRecord row : parser) {
+				MimitPriceRecord record = toPriceRecord(row, skipConsumer);
+				if (record == null) {
+					continue;
+				}
+				batch.add(record);
+				if (batch.size() >= batchSize) {
+					batchConsumer.accept(List.copyOf(batch));
+					batch.clear();
+				}
+			}
+			if (!batch.isEmpty()) {
+				batchConsumer.accept(List.copyOf(batch));
+			}
+		} catch (IllegalArgumentException | IOException ex) {
+			throw new MimitImportException("Invalid MIMIT CSV content", ex);
+		}
+	}
+
+	private MimitPriceRecord toPriceRecord(CSVRecord row, Consumer<String> skipConsumer) {
+		try {
+			String stationMimitId = first(row, "idimpianto", "id_impianto", "id impianto", "station_mimit_id");
+			String fuelName = first(row, "desc_carburante", "carburante", "fuel_type_name", "fuel", "nomecarburante");
+			BigDecimal price = parseBigDecimal(first(row, "prezzo", "price"));
+			if (isBlank(stationMimitId) || isBlank(fuelName) || price == null) {
+				skipConsumer.accept("Skipping MIMIT price row " + row.getRecordNumber()
+						+ ": missing station, fuel or price");
+				return null;
+			}
+			return new MimitPriceRecord(stationMimitId, normalizeFuelTypeName(first(row, "codice_carburante",
+					"fuel_type_code", "fuel_code", "carburante", "desc_carburante", "nomecarburante")), fuelName,
+					price, parseBoolean(first(row, "is_self", "self", "self_service", "tipo", "servito")),
+					parseDateTime(first(row, "dtcomu", "dt_comu", "data_comunicazione", "communicated_at")));
+		} catch (RuntimeException ex) {
+			skipConsumer.accept("Skipping malformed MIMIT price row " + row.getRecordNumber() + ": " + ex.getMessage());
+			return null;
+		}
 	}
 
 	public String normalizeFuelTypeName(String rawName) {
@@ -157,6 +199,35 @@ public class MimitCsvParser {
 		} catch (IllegalArgumentException | IOException ex) {
 			throw new MimitImportException("Invalid MIMIT CSV content", ex);
 		}
+	}
+
+	private Reader readerStartingAtFirstDelimitedLine(Path csvPath) throws IOException {
+		Reader reader = Files.newBufferedReader(csvPath, StandardCharsets.UTF_8);
+		StringBuilder firstLine = new StringBuilder();
+		int value;
+		boolean foundDelimiter = false;
+		while ((value = reader.read()) != -1) {
+			char current = (char) value;
+			if (current == '\r') {
+				continue;
+			}
+			if (current == '\n') {
+				if (foundDelimiter) {
+					break;
+				}
+				firstLine.setLength(0);
+				continue;
+			}
+			firstLine.append(current);
+			if (current == MIMIT_DELIMITER) {
+				foundDelimiter = true;
+			}
+		}
+		if (!foundDelimiter) {
+			reader.close();
+			return new StringReader("");
+		}
+		return new PrefixedReader(firstLine.append('\n').toString(), reader);
 	}
 
 	private String removePreamble(String csv) {
@@ -245,5 +316,30 @@ public class MimitCsvParser {
 
 	private boolean isBlank(String value) {
 		return value == null || value.isBlank();
+	}
+
+	private static final class PrefixedReader extends Reader {
+		private final StringReader prefix;
+		private final Reader delegate;
+
+		private PrefixedReader(String prefix, Reader delegate) {
+			this.prefix = new StringReader(prefix);
+			this.delegate = delegate;
+		}
+
+		@Override
+		public int read(char[] cbuf, int off, int len) throws IOException {
+			int read = prefix.read(cbuf, off, len);
+			return read != -1 ? read : delegate.read(cbuf, off, len);
+		}
+
+		@Override
+		public void close() throws IOException {
+			try {
+				prefix.close();
+			} finally {
+				delegate.close();
+			}
+		}
 	}
 }
