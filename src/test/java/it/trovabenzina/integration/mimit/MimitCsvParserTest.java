@@ -123,4 +123,13 @@ class MimitCsvParserTest {
 		assertThat(batches.getFirst().getFirst().fuelTypeCode()).isEqualTo("BENZINA");
 		assertThat(batches.getFirst().get(1).fuelTypeCode()).isEqualTo("DIESEL");
 	}
+
+	@Test
+	void mapsSpecialFuelNamesToFrontendMacroCategories() {
+		assertThat(parser.normalizeFuelTypeName("Blue Diesel")).isEqualTo("DIESEL");
+		assertThat(parser.normalizeFuelTypeName("HVO")).isEqualTo("DIESEL");
+		assertThat(parser.normalizeFuelTypeName("Gasolio Premium")).isEqualTo("DIESEL");
+		assertThat(parser.normalizeFuelTypeName("Benzina WR 100")).isEqualTo("BENZINA");
+		assertThat(parser.normalizeFuelTypeName("GNL")).isEqualTo("METANO");
+	}
 }

@@ -153,18 +153,19 @@ public class MimitCsvParser {
 
 	private MimitPriceRecord toPriceRecord(CSVRecord row, Consumer<String> skipConsumer) {
 		try {
-			String stationMimitId = first(row, "idimpianto", "id_impianto", "id impianto", "station_mimit_id");
-			String fuelName = first(row, "desc_carburante", "carburante", "fuel_type_name", "fuel", "nomecarburante");
-			BigDecimal price = parseBigDecimal(first(row, "prezzo", "price"));
+			Map<String, String> values = row.toMap();
+			String stationMimitId = first(values, "idimpianto", "id_impianto", "id impianto", "station_mimit_id");
+			String fuelName = first(values, "desc_carburante", "carburante", "fuel_type_name", "fuel", "nomecarburante");
+			BigDecimal price = parseBigDecimal(first(values, "prezzo", "price"));
 			if (isBlank(stationMimitId) || isBlank(fuelName) || price == null) {
 				skipConsumer.accept("Skipping MIMIT price row " + row.getRecordNumber()
 						+ ": missing station, fuel or price");
 				return null;
 			}
-			return new MimitPriceRecord(stationMimitId, normalizeFuelTypeName(first(row, "codice_carburante",
+			return new MimitPriceRecord(stationMimitId, normalizeFuelTypeName(first(values, "codice_carburante",
 					"fuel_type_code", "fuel_code", "carburante", "desc_carburante", "nomecarburante")), fuelName,
-					price, parseBoolean(first(row, "is_self", "self", "self_service", "tipo", "servito")),
-					parseDateTime(first(row, "dtcomu", "dt_comu", "data_comunicazione", "communicated_at")));
+					price, parseBoolean(first(values, "is_self", "self", "self_service", "tipo", "servito")),
+					parseDateTime(first(values, "dtcomu", "dt_comu", "data_comunicazione", "communicated_at")));
 		} catch (RuntimeException ex) {
 			skipConsumer.accept("Skipping malformed MIMIT price row " + row.getRecordNumber() + ": " + ex.getMessage());
 			return null;
@@ -175,14 +176,23 @@ public class MimitCsvParser {
 		if (isBlank(rawName)) {
 			return null;
 		}
-		String normalized = rawName.trim().toUpperCase(Locale.ROOT).replace("À", "A").replace("È", "E")
-				.replace("É", "E").replace("Ì", "I").replace("Ò", "O").replace("Ù", "U")
-				.replaceAll("[^A-Z0-9]+", "_").replaceAll("^_+|_+$", "");
+		String normalized = normalizeCode(rawName);
 		return switch (normalized) {
-			case "GASOLIO", "DIESEL", "GASOLIO_SELF", "DIESEL_SELF" -> "DIESEL";
-			case "BENZINA", "SUPER", "SENZA_PIOMBO", "VERDE" -> "BENZINA";
+			case "GASOLIO", "DIESEL", "GASOLIO_SELF", "DIESEL_SELF", "BLUE_DIESEL", "BLU_DIESEL_ALPINO",
+					"DIESELMAX", "E_DIESEL", "EXCELLIUM_DIESEL", "GP_DIESEL", "HI_Q_DIESEL", "S_DIESEL",
+					"SUPREME_DIESEL", "DIESEL_SHELL_V_POWER", "GASOLIO_PREMIUM", "GASOLIO_PRESTAZIONALE",
+					"GASOLIO_SPECIALE", "GASOLIO_PLUS", "GASOLIO_ALPINO", "GASOLIO_ARTICO",
+					"GASOLIO_ARTICO_IGLOO", "GASOLIO_GELO", "GASOLIO_ECOPLUS", "GASOLIO_ENERGY_D",
+					"GASOLIO_ORO_DIESEL", "DIESEL_HVO", "DIESEL_HVO_ENERGY", "GASOLIO_HVO",
+					"GASOLIO_BIO_HVO", "HVO", "HVO100", "HVO_ENERGY_DIESEL", "HVO_FUTURE", "HVO_ECO_DIESEL",
+					"HVOLUTION", "HVOVOLUTION", "BCHVO", "REHVO" -> "DIESEL";
+			case "BENZINA", "SUPER", "SENZA_PIOMBO", "VERDE", "BLUE_SUPER", "BENZINA_100_OTTANI",
+					"BENZINA_102_OTTANI", "BENZINA_ENERGY_98_OTTANI", "BENZINA_PLUS_98",
+					"BENZINA_SHELL_V_POWER", "BENZINA_SPECIALE_98_OTTANI", "BENZINA_SPECIALE",
+					"BENZINA_WR_100", "VERDE_SPECIALE", "F_101", "F101", "HIQ_PERFORM",
+					"HIQ_PERFORM_B100_OTTANI", "V_POWER" -> "BENZINA";
 			case "GPL" -> "GPL";
-			case "METANO", "CNG" -> "METANO";
+			case "METANO", "CNG", "GNL", "L_GNC", "LNG" -> "METANO";
 			default -> normalized;
 		};
 	}
@@ -241,11 +251,11 @@ public class MimitCsvParser {
 		return normalized;
 	}
 
-	private String first(CSVRecord row, String... keys) {
-		Map<String, String> values = row.toMap();
+	private String first(Map<String, String> values, String... keys) {
 		for (String key : keys) {
+			String normalizedKey = normalizeHeader(key);
 			for (Map.Entry<String, String> entry : values.entrySet()) {
-				if (normalizeHeader(entry.getKey()).equals(normalizeHeader(key)) && !isBlank(entry.getValue())) {
+				if (normalizeHeader(entry.getKey()).equals(normalizedKey) && !isBlank(entry.getValue())) {
 					return cleanValue(entry.getValue());
 				}
 			}
@@ -269,7 +279,50 @@ public class MimitCsvParser {
 	}
 
 	private String normalizeHeader(String value) {
-		return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
+		if (value == null) {
+			return "";
+		}
+		StringBuilder normalized = new StringBuilder(value.length());
+		for (int i = 0; i < value.length(); i++) {
+			char current = Character.toLowerCase(value.charAt(i));
+			if ((current >= 'a' && current <= 'z') || (current >= '0' && current <= '9')) {
+				normalized.append(current);
+			}
+		}
+		return normalized.toString();
+	}
+
+	private String normalizeCode(String value) {
+		String upper = value.trim().toUpperCase(Locale.ROOT);
+		StringBuilder normalized = new StringBuilder(upper.length());
+		boolean previousWasSeparator = true;
+		for (int i = 0; i < upper.length(); i++) {
+			char current = normalizeItalianLetter(upper.charAt(i));
+			boolean alphaNumeric = (current >= 'A' && current <= 'Z') || (current >= '0' && current <= '9');
+			if (alphaNumeric) {
+				normalized.append(current);
+				previousWasSeparator = false;
+			} else if (!previousWasSeparator) {
+				normalized.append('_');
+				previousWasSeparator = true;
+			}
+		}
+		int length = normalized.length();
+		if (length > 0 && normalized.charAt(length - 1) == '_') {
+			normalized.setLength(length - 1);
+		}
+		return normalized.toString();
+	}
+
+	private char normalizeItalianLetter(char value) {
+		return switch (value) {
+			case 'À' -> 'A';
+			case 'È', 'É' -> 'E';
+			case 'Ì' -> 'I';
+			case 'Ò' -> 'O';
+			case 'Ù' -> 'U';
+			default -> value;
+		};
 	}
 
 	private Double parseDouble(String value) {
