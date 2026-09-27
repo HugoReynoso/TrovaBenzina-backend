@@ -105,7 +105,7 @@ class MimitImportServiceTest {
 		fuelType.setId(3L);
 		fuelType.setCode("BENZINA");
 		fuelType.setName("Benzina");
-		when(fuelTypeRepository.findAll()).thenReturn(List.of(fuelType));
+		when(fuelTypeRepository.findByUpperCodeIn(anyCollection())).thenReturn(List.of(fuelType));
 		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(java.util.Optional.of(fuelType));
 		when(stationPriceRepository.findCurrentByStationIdInAndFuelTypeIdIn(anyCollection(), anyCollection()))
 				.thenReturn(List.of());
@@ -121,6 +121,7 @@ class MimitImportServiceTest {
 		verify(stationPriceRepository).saveAll(any());
 		verify(statisticService).recalculate(7L, fuelType, LocalDate.now());
 		verify(stationPriceRepository, never()).findAll();
+		verify(fuelTypeRepository, never()).findAll();
 	}
 
 	@Test
@@ -154,7 +155,7 @@ class MimitImportServiceTest {
 		FuelType fuelType = new FuelType();
 		fuelType.setId(3L);
 		fuelType.setCode("BENZINA");
-		when(fuelTypeRepository.findAll()).thenReturn(List.of(fuelType));
+		when(fuelTypeRepository.findByUpperCodeIn(anyCollection())).thenReturn(List.of(fuelType));
 		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(java.util.Optional.of(fuelType));
 
 		StationPrice current = new StationPrice();
@@ -172,6 +173,7 @@ class MimitImportServiceTest {
 		assertThat(result.pricesUpdated()).isEqualTo(1);
 		assertThat(result.historyInserted()).isZero();
 		verify(stationPriceRepository, never()).findAll();
+		verify(fuelTypeRepository, never()).findAll();
 	}
 
 	@Test
@@ -194,7 +196,7 @@ class MimitImportServiceTest {
 		FuelType fuelType = new FuelType();
 		fuelType.setId(3L);
 		fuelType.setCode("BENZINA");
-		when(fuelTypeRepository.findAll()).thenReturn(List.of(fuelType));
+		when(fuelTypeRepository.findByUpperCodeIn(anyCollection())).thenReturn(List.of(fuelType));
 		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(java.util.Optional.of(fuelType));
 		when(stationPriceRepository.findCurrentByStationIdInAndFuelTypeIdIn(anyCollection(), anyCollection()))
 				.thenReturn(List.of());
@@ -206,6 +208,7 @@ class MimitImportServiceTest {
 		assertThat(result.pricesInserted()).isEqualTo(1);
 		verify(downloadService, never()).download(eq("https://example.test/stations.csv"));
 		verify(stationPriceRepository, never()).findAll();
+		verify(fuelTypeRepository, never()).findAll();
 	}
 
 	private Path writeTempCsv(String csv) throws Exception {

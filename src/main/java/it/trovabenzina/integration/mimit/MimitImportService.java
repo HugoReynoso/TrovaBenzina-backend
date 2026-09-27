@@ -205,7 +205,7 @@ public class MimitImportService {
 	private PriceBatchResult upsertPriceBatch(List<MimitPriceRecord> records) {
 		PriceBatchAccumulator result = new PriceBatchAccumulator();
 		Map<String, Station> stationsByMimitId = findStationsForPriceBatch(records);
-		Map<String, FuelType> fuelTypesByCode = loadFuelTypesByCode();
+		Map<String, FuelType> fuelTypesByCode = loadFuelTypesByCode(records);
 		List<PriceRow> rows = new ArrayList<>(records.size());
 
 		for (MimitPriceRecord record : records) {
@@ -290,8 +290,13 @@ public class MimitImportService {
 				.collect(Collectors.toMap(station -> station.getMimitId().trim(), Function.identity(), (left, right) -> left));
 	}
 
-	private Map<String, FuelType> loadFuelTypesByCode() {
-		return fuelTypeRepository.findAll().stream().filter(fuelType -> !isBlank(fuelType.getCode()))
+	private Map<String, FuelType> loadFuelTypesByCode(List<MimitPriceRecord> records) {
+		Set<String> codes = records.stream().map(MimitPriceRecord::fuelTypeCode).filter(value -> !isBlank(value))
+				.map(csvParser::normalizeFuelTypeName).filter(value -> !isBlank(value)).collect(Collectors.toSet());
+		if (codes.isEmpty()) {
+			return new LinkedHashMap<>();
+		}
+		return fuelTypeRepository.findByUpperCodeIn(codes).stream().filter(fuelType -> !isBlank(fuelType.getCode()))
 				.collect(Collectors.toMap(fuelType -> fuelType.getCode().trim().toUpperCase(Locale.ROOT),
 						Function.identity(), (left, right) -> left, LinkedHashMap::new));
 	}
