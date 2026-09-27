@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.PageRequest;
@@ -150,7 +151,7 @@ public class StationService {
 		if (normalizedFuelType != null && fuelTypeRepository.findByCodeIgnoreCase(normalizedFuelType).isEmpty()) {
 			throw new IllegalArgumentException("Invalid fuelType " + normalizedFuelType);
 		}
-		return normalizedFuelType;
+		return normalizedFuelType == null ? null : normalizedFuelType.toUpperCase(Locale.ROOT);
 	}
 
 	private void validateProvince(Long provinceId) {

@@ -31,7 +31,7 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			where s.active = true
 			  and (:cityId is null or c.id = :cityId)
 			  and (:provinceId is null or p.id = :provinceId)
-			  and (:fuelType is null or upper(ft.code) = upper(:fuelType))
+			  and (:fuelType is null or upper(ft.code) = :fuelType)
 			  and (:selfService is null or sp.selfService = :selfService)
 			  and (:minLat is null or s.latitude >= :minLat)
 			  and (:maxLat is null or s.latitude <= :maxLat)
@@ -64,7 +64,7 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			where s.active = true
 			  and (:cityId is null or c.id = :cityId)
 			  and (:provinceId is null or p.id = :provinceId)
-			  and upper(ft.code) = upper(:fuelType)
+			  and upper(ft.code) = :fuelType
 			  and (:selfService is null or sp.selfService = :selfService)
 			order by sp.price asc
 			""")
@@ -80,7 +80,7 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			where s.active = true
 			  and s.latitude is not null
 			  and s.longitude is not null
-			  and (:fuelType is null or upper(ft.code) = upper(:fuelType))
+			  and (:fuelType is null or upper(ft.code) = :fuelType)
 			  and (:selfService is null or sp.selfService = :selfService)
 			""")
 	List<Station> findNearbyCandidates(@Param("fuelType") String fuelType,
@@ -97,7 +97,7 @@ public interface StationRepository extends JpaRepository<Station, Long> {
 			  and s.longitude is not null
 			  and lower(s.municipality) = lower(:municipality)
 			  and upper(s.provinceCode) = upper(:provinceCode)
-			  and (:fuelType is null or upper(ft.code) = upper(:fuelType))
+			  and (:fuelType is null or upper(ft.code) = :fuelType)
 			  and (:selfService is null or sp.selfService = :selfService)
 			""")
 	List<Station> findStationsByMunicipalityAndProvinceCode(@Param("municipality") String municipality,
