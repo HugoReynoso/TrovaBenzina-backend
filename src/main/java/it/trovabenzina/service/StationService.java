@@ -53,7 +53,7 @@ public class StationService {
 		Long effectiveProvinceId = cityId == null ? provinceId : null;
 		validateProvince(effectiveProvinceId);
 		String normalizedFuelType = normalizeAndValidateFuelType(fuelType);
-		int safeLimit = limit == null ? 250 : Math.max(1, Math.min(limit, 1500));
+		int safeLimit = limit == null ? 1500 : Math.max(1, Math.min(limit, 1500));
 		List<Station> stations = stationRepository.findStations(cityId, effectiveProvinceId, normalizedFuelType,
 				selfService, minLat, maxLat, minLng, maxLng, PageRequest.of(0, safeLimit));
 		return mapWithPrices(stations, normalizedFuelType, selfService);

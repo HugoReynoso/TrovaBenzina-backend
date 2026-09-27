@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +17,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -84,6 +87,21 @@ class StationServiceTest {
 		assertThat(result).hasSize(1);
 		assertThat(result.getFirst().prices()).hasSize(1);
 		assertThat(result.getFirst().prices().getFirst().selfService()).isTrue();
+	}
+
+	@Test
+	void findAllDefaultsTo1500AndCapsAt1500Markers() {
+		when(provinceRepository.existsById(1L)).thenReturn(true);
+		when(stationRepository.findStations(isNull(), eq(1L), isNull(), isNull(), isNull(), isNull(), isNull(),
+				isNull(), any(Pageable.class))).thenReturn(List.of());
+
+		stationService.findAll(null, 1L, null, null, null, null, null, null, null);
+		stationService.findAll(null, 1L, null, null, 2000, null, null, null, null);
+
+		ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+		verify(stationRepository, times(2)).findStations(isNull(), eq(1L), isNull(), isNull(), isNull(), isNull(),
+				isNull(), isNull(), pageable.capture());
+		assertThat(pageable.getAllValues()).extracting(Pageable::getPageSize).containsExactly(1500, 1500);
 	}
 
 	@Test
