@@ -9,6 +9,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import it.trovabenzina.service.FrontendRebuildService;
+
 @Component
 @ConditionalOnProperty(name = "mimit.import.enabled", havingValue = "true")
 public class MimitImportScheduler {
@@ -17,10 +19,13 @@ public class MimitImportScheduler {
 
 	private final MimitProperties properties;
 	private final MimitImportService importService;
+	private final FrontendRebuildService frontendRebuildService;
 
-	public MimitImportScheduler(MimitProperties properties, MimitImportService importService) {
+	public MimitImportScheduler(MimitProperties properties, MimitImportService importService,
+			FrontendRebuildService frontendRebuildService) {
 		this.properties = properties;
 		this.importService = importService;
+		this.frontendRebuildService = frontendRebuildService;
 	}
 
 	@Scheduled(cron = "${mimit.import.cron}")
@@ -31,6 +36,7 @@ public class MimitImportScheduler {
 			MimitImportResult result = importService.importData();
 			log.info("Scheduled MIMIT import completed in {} ms: {}", Duration.between(startedAt, Instant.now()).toMillis(),
 					result);
+			frontendRebuildService.triggerRebuild("scheduled MIMIT import");
 		} catch (RuntimeException ex) {
 			log.warn("Scheduled MIMIT import failed after {} ms: {}", Duration.between(startedAt, Instant.now()).toMillis(),
 					ex.getMessage());
