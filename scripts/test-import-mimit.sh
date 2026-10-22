@@ -28,6 +28,8 @@ curl() {
     https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv)
       if [[ "${TEST_FAILURE:-}" == bad_csv ]]; then
         printf '<html>Unavailable</html>\n' > "$output"
+      elif [[ "${TEST_FAILURE:-}" == camel_case ]]; then
+        printf 'Estrazione del 2026-10-22\r\nidImpianto|descCarburante|prezzo|isSelf|dtComu\r\n123|Benzina|1.789|1|22/10/2026 08:00:00\r\n' > "$output"
       else
         printf 'idImpianto|desc_carburante|prezzo|is_self|dtComu\n123|Benzina|1.789|1|22/10/2026 08:00:00\n' > "$output"
       fi ;;
@@ -77,6 +79,7 @@ run_case full '' success
 [[ "$(wc -l < "$TEST_CALL_LOG")" == 4 ]]
 run_case prices '' success
 [[ "$(wc -l < "$TEST_CALL_LOG")" == 3 ]]
+run_case full camel_case success
 run_case full bad_csv failure
 ! grep -q '/api/' "$TEST_CALL_LOG"
 run_case prices login failure

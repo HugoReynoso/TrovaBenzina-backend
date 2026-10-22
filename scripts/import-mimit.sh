@@ -29,18 +29,24 @@ download() {
   test -s "$work_dir/$dataset.csv"
 }
 
+validate_header() {
+  local header
+  header="$(LC_ALL=C grep -m1 -F '|' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cd 'a-z0-9|')" || {
+    echo 'MIMIT CSV header not found; import cancelled' >&2; return 1;
+  }
+  [[ "$header" == "$2" ]] || {
+    echo 'Unexpected MIMIT CSV header; import cancelled' >&2; return 1;
+  }
+}
+
 echo 'Downloading official MIMIT prices'
 download prezzo_alle_8
-grep -Fq 'idImpianto|desc_carburante|prezzo|is_self|dtComu' "$work_dir/prezzo_alle_8.csv" || {
-  echo 'Unexpected MIMIT prices header; import cancelled' >&2; exit 1;
-}
+validate_header "$work_dir/prezzo_alle_8.csv" 'idimpianto|desccarburante|prezzo|isself|dtcomu'
 if [[ "$IMPORT_MODE" == full ]]; then
   echo 'Downloading official MIMIT stations'
   download anagrafica_impianti_attivi
-  grep -Fq 'idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine' \
-    "$work_dir/anagrafica_impianti_attivi.csv" || {
-      echo 'Unexpected MIMIT stations header; import cancelled' >&2; exit 1;
-    }
+  validate_header "$work_dir/anagrafica_impianti_attivi.csv" \
+    'idimpianto|gestore|bandiera|tipoimpianto|nomeimpianto|indirizzo|comune|provincia|latitudine|longitudine'
 fi
 
 # Credentials and JWT stay in private temporary files, not in command arguments or logs.

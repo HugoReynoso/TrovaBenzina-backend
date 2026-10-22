@@ -4,6 +4,30 @@ Questo percorso evita le connessioni in uscita da Render verso MIMIT: il downloa
 avviene sul runner GitHub Actions, poi i file vengono inviati al backend via HTTPS.
 La fonte resta il Ministero, senza mirror di terze parti.
 
+## Alternativa Windows verificabile dal PC
+
+Il 22 ottobre 2026 anche il runner GitHub ha restituito un timeout TCP verso MIMIT.
+Il workflow non supera quindi il problema su quel runner. Puoi eseguire lo stesso
+flusso dal PC Windows, dove il download e' riuscito durante i test:
+
+```powershell
+.\scripts\import-mimit-local.ps1
+```
+
+Lo script scarica i due CSV ufficiali e chiede email e password admin del backend.
+La password viene richiesta come input nascosto, non viene salvata su file e non
+deve essere incollata nella chat. I prezzi vengono aggiornati su Render via upload JWT.
+Richiede il deploy del backend con i nuovi endpoint upload.
+
+Per aggiornare solo i prezzi: `.\scripts\import-mimit-local.ps1 -Mode prices`.
+Per controllare solo i download, senza login o aggiornamenti:
+`.\scripts\import-mimit-local.ps1 -CheckDownloads`.
+Puoi anche passare CSV gia' scaricati con `-PricesFile` e `-StationsFile`.
+In questo caso lo script lascia intatti i file originali.
+
+Se mantieni GitHub Actions, lascia `MIMIT_ACTIONS_ENABLED` disattivata finche'
+non viene verificato un runner capace di raggiungere il ministero.
+
 ## Attivazione
 
 1. Pubblica queste modifiche su GitHub e distribuisci il backend aggiornato su Render.
@@ -107,6 +131,7 @@ Lo script `scripts/import-mimit.sh` puo' anche essere eseguito in Bash con `curl
   controlla `communicatedAt` e la data di estrazione se il ministero pubblica in ritardo.
 - Test: `./mvnw test`. I test HTTP verificano JWT, multipart, limiti di dimensione e cleanup.
 - Test script, con Bash e jq disponibili: `bash scripts/test-import-mimit.sh`.
+- Test dello script Windows, con Node.js e Windows PowerShell: `node scripts/test-import-mimit-local.mjs`.
 - Test live opzionali: `./mvnw -Dmimit.live-test=true -Dtest=MimitDownloadLiveTest test`.
 
 Riferimento per la configurazione dei secret:

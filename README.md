@@ -195,6 +195,10 @@ e `POST /api/admin/mimit/import/prices/upload` (parte `prices`).
 Guida per secret GitHub, attivazione del workflow e caricamento manuale:
 [Import MIMIT tramite upload](docs/mimit-upload.md).
 
+Se anche il runner GitHub non raggiunge MIMIT, da Windows puoi usare
+`.\scripts\import-mimit-local.ps1`: scarica i CSV sul PC, richiede il login admin
+e li invia al backend via upload. Con `-CheckDownloads` verifica solo i download.
+
 Variabili richieste:
 
 ```properties
