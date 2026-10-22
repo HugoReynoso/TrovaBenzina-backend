@@ -3,6 +3,7 @@ package it.trovabenzina.integration.mimit;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -15,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -29,6 +31,7 @@ import it.trovabenzina.entity.FuelType;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
 import it.trovabenzina.entity.StationPriceHistory;
+import it.trovabenzina.exception.MimitImportException;
 import it.trovabenzina.repository.CityRepository;
 import it.trovabenzina.repository.FuelTypeRepository;
 import it.trovabenzina.repository.StationPriceHistoryRepository;
@@ -104,23 +107,73 @@ public class MimitImportService {
 	private void importStationsInto(ImportState state) {
 		String stationsCsv = downloadService.download(properties.stationsUrl());
 		List<MimitStationRecord> stationRecords = csvParser.parseStations(stationsCsv);
+		importStationsInto(stationRecords, state);
+	}
+
+	private void importStationsInto(List<MimitStationRecord> stationRecords, ImportState state) {
 		state.stationsRead += stationRecords.size();
 		transactionTemplate.executeWithoutResult(status -> upsertStations(stationRecords, state));
 	}
 
 	private void importPricesInto(ImportState state) {
 		Path pricesFile = null;
-		Set<CityFuelPair> cityFuelPairs = new HashSet<>();
 		try {
 			pricesFile = downloadService.downloadToTempFile(properties.pricesUrl());
-			csvParser.parsePrices(pricesFile, PRICE_BATCH_SIZE, batch -> {
-				state.pricesRead += batch.size();
-				processPriceBatch(batch, state, cityFuelPairs);
-			}, state::skipPrice);
-			recalculateStatistics(cityFuelPairs, state);
+			importPricesInto(pricesFile, state);
 		} finally {
 			deleteTempFile(pricesFile);
 		}
+	}
+
+	// Uploaded paths are owned by the caller and are never deleted here.
+	public MimitImportResult importUploadedData(Path stationsFile, Path pricesFile) {
+		ImportState state = new ImportState(Instant.now());
+		log.info("Starting uploaded MIMIT import");
+		csvParser.validateStationsUpload(stationsFile);
+		List<MimitStationRecord> stations;
+		try {
+			stations = csvParser.parseStations(Files.readString(stationsFile, StandardCharsets.UTF_8));
+		} catch (IOException ex) {
+			throw new MimitImportException("Unable to read uploaded MIMIT stations", ex);
+		}
+		if (stations.isEmpty()) {
+			throw new MimitImportException("Uploaded MIMIT stations CSV contains no valid stations");
+		}
+		// Validate the complete prices file before committing any station changes.
+		validateUploadedPrices(pricesFile);
+		importStationsInto(stations, state);
+		importPricesInto(pricesFile, state);
+		MimitImportResult result = state.toResult(Instant.now());
+		log.info("Completed uploaded MIMIT import: {}", result);
+		return result;
+	}
+
+	public MimitImportResult importUploadedPrices(Path pricesFile) {
+		ImportState state = new ImportState(Instant.now());
+		log.info("Starting uploaded MIMIT prices import");
+		validateUploadedPrices(pricesFile);
+		importPricesInto(pricesFile, state);
+		MimitImportResult result = state.toResult(Instant.now());
+		log.info("Completed uploaded MIMIT prices import: {}", result);
+		return result;
+	}
+
+	private void validateUploadedPrices(Path pricesFile) {
+		csvParser.validatePricesUpload(pricesFile);
+		AtomicInteger validPrices = new AtomicInteger();
+		csvParser.parsePrices(pricesFile, PRICE_BATCH_SIZE, batch -> validPrices.addAndGet(batch.size()), message -> { });
+		if (validPrices.get() == 0) {
+			throw new MimitImportException("Uploaded MIMIT prices CSV contains no valid prices");
+		}
+	}
+
+	private void importPricesInto(Path pricesFile, ImportState state) {
+		Set<CityFuelPair> cityFuelPairs = new HashSet<>();
+		csvParser.parsePrices(pricesFile, PRICE_BATCH_SIZE, batch -> {
+			state.pricesRead += batch.size();
+			processPriceBatch(batch, state, cityFuelPairs);
+		}, state::skipPrice);
+		recalculateStatistics(cityFuelPairs, state);
 	}
 
 	private void upsertStations(List<MimitStationRecord> records, ImportState state) {

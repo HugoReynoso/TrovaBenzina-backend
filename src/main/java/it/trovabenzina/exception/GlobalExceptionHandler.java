@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import it.trovabenzina.dto.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
@@ -48,6 +50,18 @@ public class GlobalExceptionHandler {
 		ex.getBindingResult().getFieldErrors()
 				.forEach(error -> validationErrors.put(error.getField(), error.getDefaultMessage()));
 		return build(HttpStatus.BAD_REQUEST, "Validation failed", request, validationErrors);
+	}
+
+	@ExceptionHandler(MaxUploadSizeExceededException.class)
+	public ResponseEntity<ApiErrorResponse> handleUploadTooLarge(MaxUploadSizeExceededException ex,
+			HttpServletRequest request) {
+		return build(HttpStatus.PAYLOAD_TOO_LARGE, "MIMIT CSV upload exceeds the configured size limit", request, null);
+	}
+
+	@ExceptionHandler(MissingServletRequestPartException.class)
+	public ResponseEntity<ApiErrorResponse> handleMissingUpload(MissingServletRequestPartException ex,
+			HttpServletRequest request) {
+		return build(HttpStatus.BAD_REQUEST, "Missing multipart file: " + ex.getRequestPartName(), request, null);
 	}
 
 	@ExceptionHandler(Exception.class)

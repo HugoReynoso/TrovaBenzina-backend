@@ -188,6 +188,13 @@ Gli endpoint `GET /api/admin/**` e `PATCH /api/admin/**` sono protetti da JWT. `
 
 Il backend integra l'import ufficiale dai CSV MIMIT Open Data. Non vengono usate fonti terze o scraping.
 
+Se Render non riesce a collegarsi a MIMIT, usa il nuovo import tramite upload:
+GitHub Actions scarica i CSV ufficiali e li invia al backend autenticandosi con JWT.
+Sono disponibili `POST /api/admin/mimit/import/upload` (parti `stations` e `prices`)
+e `POST /api/admin/mimit/import/prices/upload` (parte `prices`).
+Guida per secret GitHub, attivazione del workflow e caricamento manuale:
+[Import MIMIT tramite upload](docs/mimit-upload.md).
+
 Variabili richieste:
 
 ```properties

@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.net.http.HttpConnectTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -110,8 +111,14 @@ public class MimitDownloadService {
 			} catch (IOException ex) {
 				log.warn("MIMIT download from {} failed (attempt {}/{})", resource, attempt, maxAttempts, ex);
 				if (attempt == maxAttempts || ex instanceof SSLException) {
-					String detail = ex instanceof HttpTimeoutException ? "timed out (request timeout " + requestTimeout + ")"
-							: "failed (" + ex.getClass().getSimpleName() + ")";
+					String detail;
+					if (ex instanceof HttpConnectTimeoutException) {
+						detail = "connection timed out (connect timeout " + httpClient.connectTimeout().orElse(requestTimeout) + ")";
+					} else if (ex instanceof HttpTimeoutException) {
+						detail = "timed out (request timeout " + requestTimeout + ")";
+					} else {
+						detail = "failed (" + ex.getClass().getSimpleName() + ")";
+					}
 					throw new MimitDownloadException("MIMIT download " + detail + " for " + resource, ex);
 				}
 			}

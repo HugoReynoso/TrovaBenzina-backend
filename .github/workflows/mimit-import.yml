@@ -1,0 +1,38 @@
+name: Import MIMIT data
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Dataset to import
+        type: choice
+        required: true
+        default: full
+        options:
+          - full
+          - prices
+  schedule:
+    - cron: '17 9 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mimit-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: github.event_name == 'workflow_dispatch' || vars.MIMIT_ACTIONS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Download official CSVs and upload to backend
+        shell: bash
+        env:
+          API_BASE_URL: ${{ vars.MIMIT_API_BASE_URL || 'https://trova-benzina-api.onrender.com' }}
+          MIMIT_ADMIN_EMAIL: ${{ secrets.MIMIT_ADMIN_EMAIL }}
+          MIMIT_ADMIN_PASSWORD: ${{ secrets.MIMIT_ADMIN_PASSWORD }}
+          IMPORT_MODE: ${{ inputs.mode || 'full' }}
+        run: bash scripts/import-mimit.sh

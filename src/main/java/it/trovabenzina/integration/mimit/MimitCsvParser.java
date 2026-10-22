@@ -33,6 +33,27 @@ public class MimitCsvParser {
 	private static final Logger log = LoggerFactory.getLogger(MimitCsvParser.class);
 	private static final char MIMIT_DELIMITER = '|';
 
+	public void validateStationsUpload(Path path) {
+		validateUploadHeader(path, List.of("idimpianto", "gestore", "bandiera", "tipoimpianto", "nomeimpianto",
+				"indirizzo", "comune", "provincia", "latitudine", "longitudine"), "stations");
+	}
+
+	public void validatePricesUpload(Path path) {
+		validateUploadHeader(path, List.of("idimpianto", "desccarburante", "prezzo", "isself", "dtcomu"), "prices");
+	}
+
+	private void validateUploadHeader(Path path, List<String> expected, String dataset) {
+		CSVFormat format = CSVFormat.DEFAULT.builder().setDelimiter(MIMIT_DELIMITER).setHeader().setQuote(null)
+				.setSkipHeaderRecord(true).setTrim(true).build();
+		try (Reader reader = readerStartingAtFirstDelimitedLine(path); CSVParser parser = format.parse(reader)) {
+			if (!parser.getHeaderNames().stream().map(this::normalizeHeader).toList().equals(expected)) {
+				throw new MimitImportException("Invalid MIMIT " + dataset + " CSV header");
+			}
+		} catch (IOException | IllegalArgumentException ex) {
+			throw new MimitImportException("Unable to read MIMIT " + dataset + " CSV", ex);
+		}
+	}
+
 	public List<MimitStationRecord> parseStations(String csv) {
 		List<MimitStationRecord> records = new ArrayList<>();
 		List<String[]> rows = parseStationRows(csv);

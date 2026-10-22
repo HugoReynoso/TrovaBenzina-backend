@@ -1,10 +1,13 @@
 package it.trovabenzina.integration.mimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,6 +32,7 @@ import it.trovabenzina.entity.FuelType;
 import it.trovabenzina.entity.Province;
 import it.trovabenzina.entity.Station;
 import it.trovabenzina.entity.StationPrice;
+import it.trovabenzina.exception.MimitImportException;
 import it.trovabenzina.repository.CityRepository;
 import it.trovabenzina.repository.FuelTypeRepository;
 import it.trovabenzina.repository.StationPriceHistoryRepository;
@@ -66,7 +70,8 @@ class MimitImportServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(new SimpleTransactionStatus());
+		lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+				.thenReturn(new SimpleTransactionStatus());
 		importService = new MimitImportService(new MimitProperties("https://example.test/stations.csv",
 				"https://example.test/prices.csv", "0 0 3 * * *", false), downloadService, new MimitCsvParser(),
 				stationRepository, stationPriceRepository, historyRepository, fuelTypeRepository, cityRepository,
@@ -209,6 +214,81 @@ class MimitImportServiceTest {
 		verify(downloadService, never()).download(eq("https://example.test/stations.csv"));
 		verify(stationPriceRepository, never()).findAll();
 		verify(fuelTypeRepository, never()).findAll();
+	}
+
+	@Test
+	void importsUploadedFilesWithoutNetworkAndKeepsCallerFiles() throws Exception {
+		Path stationsFile = tempDir.resolve("stations.csv");
+		Files.writeString(stationsFile, """
+				Estrazione del 2026-10-22
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				123|Gestore|Q8|Stradale|Q8 Milano|Via Roma 1|Milano|MI|45.46|9.19
+				""");
+		Path pricesFile = uploadedPrices();
+		City city = new City();
+		city.setId(7L);
+		Station station = new Station();
+		station.setId(10L);
+		station.setMimitId("123");
+		station.setCity(city);
+		when(stationRepository.findByMimitIdIn(anyCollection())).thenReturn(List.of(station));
+		FuelType fuel = new FuelType();
+		fuel.setId(3L);
+		fuel.setCode("BENZINA");
+		when(fuelTypeRepository.findByUpperCodeIn(anyCollection())).thenReturn(List.of(fuel));
+		when(fuelTypeRepository.findByCodeIgnoreCase("BENZINA")).thenReturn(java.util.Optional.of(fuel));
+
+		MimitImportResult result = importService.importUploadedData(stationsFile, pricesFile);
+
+		assertThat(result.stationsRead()).isEqualTo(1);
+		assertThat(result.pricesInserted()).isEqualTo(1);
+		assertThat(result.historyInserted()).isEqualTo(1);
+		assertThat(result.statisticsUpdated()).isEqualTo(1);
+		assertThat(stationsFile).exists();
+		assertThat(pricesFile).exists();
+		verifyNoInteractions(downloadService);
+		verify(statisticService).recalculate(7L, fuel, LocalDate.now());
+	}
+
+	@Test
+	void rejectsInvalidPricesBeforeWritingStations() throws Exception {
+		Path stations = tempDir.resolve("stations.csv");
+		Files.writeString(stations, """
+				idImpianto|Gestore|Bandiera|Tipo Impianto|Nome Impianto|Indirizzo|Comune|Provincia|Latitudine|Longitudine
+				123|Gestore|Q8|Stradale|Q8 Milano|Via Roma 1|Milano|MI|45.46|9.19
+				""");
+		Path prices = writeTempCsv("<html>Service unavailable</html>");
+		assertThatThrownBy(() -> importService.importUploadedData(stations, prices))
+				.isInstanceOf(MimitImportException.class).hasMessageContaining("CSV header");
+		verifyNoInteractions(downloadService, stationRepository, stationPriceRepository, transactionManager);
+	}
+
+	@Test
+	void rejectsPricesWithNoValidRowsWithoutWriting() throws Exception {
+		Path prices = writeTempCsv("idImpianto|desc_carburante|prezzo|is_self|dtComu\n123|Benzina|bad|1|\n");
+		assertThatThrownBy(() -> importService.importUploadedPrices(prices))
+				.isInstanceOf(MimitImportException.class).hasMessageContaining("no valid prices");
+		verifyNoInteractions(downloadService, stationPriceRepository, transactionManager);
+	}
+
+	@Test
+	void importsUploadedPricesWithoutTouchingStations() throws Exception {
+		Path prices = uploadedPrices();
+		MimitImportResult result = importService.importUploadedPrices(prices);
+		assertThat(result.stationsRead()).isZero();
+		assertThat(result.pricesRead()).isEqualTo(1);
+		assertThat(result.pricesSkipped()).isEqualTo(1);
+		assertThat(prices).exists();
+		verify(stationRepository, never()).saveAll(any());
+		verifyNoInteractions(downloadService);
+	}
+
+	private Path uploadedPrices() throws Exception {
+		return writeTempCsv("""
+				Estrazione del 2026-10-22
+				idImpianto|desc_carburante|prezzo|is_self|dtComu
+				123|Benzina|1.789|1|22/10/2026 08:30:00
+				""");
 	}
 
 	private Path writeTempCsv(String csv) throws Exception {

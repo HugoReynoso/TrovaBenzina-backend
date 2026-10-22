@@ -167,6 +167,18 @@ class MimitDownloadServiceTest {
 	}
 
 	@Test
+	void distinguishesConnectTimeoutFromRequestTimeout() throws Exception {
+		HttpClient client = mock(HttpClient.class);
+		when(client.connectTimeout()).thenReturn(java.util.Optional.of(Duration.ofSeconds(60)));
+		when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+				.thenThrow(new java.net.http.HttpConnectTimeoutException("HTTP connect timed out"));
+		MimitDownloadService timeout = new MimitDownloadService(client, Duration.ofSeconds(120), 1, Duration.ZERO);
+		assertThatThrownBy(() -> timeout.download(url("/data")))
+				.hasMessageContaining("connection timed out (connect timeout PT1M)")
+				.hasMessageNotContaining("request timeout");
+	}
+
+	@Test
 	void rejectsMissingUrls() {
 		assertThatThrownBy(() -> service.download(" ")).isInstanceOf(MimitImportException.class)
 				.hasMessage("MIMIT URL is not configured");
