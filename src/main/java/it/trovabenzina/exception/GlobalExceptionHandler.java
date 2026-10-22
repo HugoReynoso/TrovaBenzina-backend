@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
 		return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
 	}
 
+	@ExceptionHandler(MimitDownloadException.class)
+	public ResponseEntity<ApiErrorResponse> handleMimitDownload(MimitDownloadException ex, HttpServletRequest request) {
+		log.error("MIMIT download failed while handling {} {}", request.getMethod(), request.getRequestURI(), ex);
+		return build(HttpStatus.BAD_GATEWAY, ex.getMessage(), request, null);
+	}
+
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException ex,
 			HttpServletRequest request) {

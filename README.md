@@ -191,10 +191,14 @@ Il backend integra l'import ufficiale dai CSV MIMIT Open Data. Non vengono usate
 Variabili richieste:
 
 ```properties
-MIMIT_STATIONS_URL=https://...
-MIMIT_PRICES_URL=https://...
+MIMIT_STATIONS_URL=https://www.mimit.gov.it/images/exportCSV/anagrafica_impianti_attivi.csv
+MIMIT_PRICES_URL=https://www.mimit.gov.it/images/exportCSV/prezzo_alle_8.csv
 MIMIT_IMPORT_ENABLED=false
 MIMIT_IMPORT_CRON=0 0 3 * * *
+MIMIT_CONNECT_TIMEOUT=60s
+MIMIT_REQUEST_TIMEOUT=120s
+MIMIT_DOWNLOAD_MAX_ATTEMPTS=3
+MIMIT_DOWNLOAD_RETRY_DELAY=2s
 ```
 
 Gli URL non sono hardcodati nel codice: vanno impostati tramite ambiente o `.env.properties`.
@@ -230,9 +234,21 @@ download anagrafica -> parsing -> upsert stations -> download prezzi -> parsing 
 Troubleshooting:
 
 - `MIMIT URL is not configured`: imposta `MIMIT_STATIONS_URL` e `MIMIT_PRICES_URL`
-- download HTTP fallito: verifica URL e connettività
+- download fallito: HTTP 502 indica la risorsa MIMIT e distingue timeout, errore di rete e status HTTP; la causa completa e' nei log del backend
+- timeout: limite configurabile per tentativo (120s di default), al massimo 3 tentativi con pausa di 2s per errori di rete, HTTP 429 e 5xx. Gli errori TLS non vengono ritentati; la verifica dei certificati rimane attiva
+- su Render: ridistribuisci il backend aggiornato; puoi regolare i limiti con le variabili `MIMIT_*`. I retry possono portare la durata totale oltre il limite del proxy/client
+- per aggiornare solo i prezzi: `POST /api/admin/mimit/import/prices` con `Authorization: Bearer <token>` evita il download e l'import dell'anagrafica
 - schema non vuoto senza Flyway history: lascia `FLYWAY_BASELINE_ON_MIGRATE=true` in locale
 - import parziale: controlla `messages` e contatori `stationsSkipped`, `pricesSkipped`, `errors` nella risposta
+
+Test live opzionali (download e parsing dei CSV ufficiali, senza modificare il database):
+
+```bash
+./mvnw -Dmimit.live-test=true -Dtest=MimitDownloadLiveTest test
+```
+
+Se Java 21 su Windows segnala `Unable to establish loopback connection`, esegui i test
+con `"-DargLine=-Djdk.net.unixdomain.tmpdir=."` per usare un percorso socket corto.
 
 Package:
 
